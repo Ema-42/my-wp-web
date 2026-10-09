@@ -86,7 +86,7 @@ export async function uploadWhatsAppMedia(
   return data.id as string;
 }
 
-type SendDocumentResult = {
+type SendMediaResult = {
   messages?: { id: string }[];
 };
 
@@ -98,7 +98,7 @@ export async function sendWhatsAppDocument(
   mediaId: string,
   filename: string,
   caption?: string
-): Promise<SendDocumentResult> {
+): Promise<SendMediaResult> {
   if (!API_VERSION || !PHONE_NUMBER_ID || !ACCESS_TOKEN) {
     throw new Error("Faltan variables de entorno de WhatsApp (.env)");
   }
@@ -134,5 +134,51 @@ export async function sendWhatsAppDocument(
     throw new Error(message);
   }
 
-  return data as SendDocumentResult;
+  return data as SendMediaResult;
+}
+
+/**
+ * POST /{Phone-Number-ID}/messages — Send Image Message by ID
+ * The image renders inline in the recipient's chat (not as a download).
+ */
+export async function sendWhatsAppImage(
+  to: string,
+  mediaId: string,
+  caption?: string
+): Promise<SendMediaResult> {
+  if (!API_VERSION || !PHONE_NUMBER_ID || !ACCESS_TOKEN) {
+    throw new Error("Faltan variables de entorno de WhatsApp (.env)");
+  }
+
+  const res = await fetch(
+    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "image",
+        image: {
+          id: mediaId,
+          ...(caption ? { caption } : {}),
+        },
+      }),
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    const message =
+      (data?.error?.message as string | undefined) ??
+      "Error enviando la imagen de WhatsApp";
+    throw new Error(message);
+  }
+
+  return data as SendMediaResult;
 }

@@ -14,6 +14,8 @@ export type ChatSummary = {
 export type ChatAttachment = {
   filename: string;
   mimeType?: string;
+  mediaType?: "image" | "document";
+  whatsappMediaId?: string;
 };
 
 export type ChatMessage = {

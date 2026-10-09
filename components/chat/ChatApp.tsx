@@ -4,11 +4,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, ChatSummary } from "@/lib/types";
 import { ChatSidebar, type WindowFilter } from "./ChatSidebar";
 import { ChatWindow } from "./ChatWindow";
+import { ThemeProvider, useTheme } from "./ThemeContext";
 
 const CHATS_POLL_MS = 5000;
 const MESSAGES_POLL_MS = 3000;
 
 export function ChatApp() {
+  return (
+    <ThemeProvider>
+      <ChatAppInner />
+    </ThemeProvider>
+  );
+}
+
+function ChatAppInner() {
+  const { colors } = useTheme();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null
@@ -87,12 +97,13 @@ export function ChatApp() {
   );
 
   const handleSendFile = useCallback(
-    async (file: File) => {
+    async (file: File, caption?: string) => {
       if (!selectedSessionId) return;
 
       const form = new FormData();
       form.append("sessionId", selectedSessionId);
       form.append("file", file);
+      if (caption) form.append("caption", caption);
 
       const res = await fetch("/api/documents", {
         method: "POST",
@@ -115,7 +126,7 @@ export function ChatApp() {
   const selectedChat = chats.find((chat) => chat.sessionId === selectedSessionId);
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex h-full w-full" style={{ background: colors.bgChat }}>
       <ChatSidebar
         chats={chats}
         selectedSessionId={selectedSessionId}

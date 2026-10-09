@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, CHAT_HISTORY_TABLE } from "@/lib/db";
 import { parseChatMessage } from "@/lib/chat-message";
-import { sendWhatsAppDocument, uploadWhatsAppMedia } from "@/lib/whatsapp";
+import { sendWhatsAppDocument, sendWhatsAppImage, uploadWhatsAppMedia } from "@/lib/whatsapp";
+
+function isImage(mimeType: string) {
+  return mimeType.startsWith("image/");
+}
 import { getSessionServiceWindow } from "@/lib/service-window";
 
 // WhatsApp Cloud API's own limit for document attachments.
@@ -46,13 +50,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const filename = file.name || "documento";
+  const filename = file.name || "archivo";
+  const mimeType = file.type || "";
   const captionText = typeof caption === "string" ? caption.trim() : "";
+  const image = isImage(mimeType);
 
   let mediaId: string;
   try {
     mediaId = await uploadWhatsAppMedia(file, filename);
-    await sendWhatsAppDocument(sessionId, mediaId, filename, captionText || undefined);
+    if (image) {
+      await sendWhatsAppImage(sessionId, mediaId, captionText || undefined);
+    } else {
+      await sendWhatsAppDocument(sessionId, mediaId, filename, captionText || undefined);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error desconocido";
     return NextResponse.json({ error: message }, { status: 502 });
@@ -66,12 +76,13 @@ export async function POST(request: NextRequest) {
       sessionId,
       JSON.stringify({
         type: "ai",
-        content: captionText || `📎 ${filename}`,
+        content: captionText || (image ? `🖼️ ${filename}` : `📎 ${filename}`),
         tool_calls: [],
         additional_kwargs: {
           attachment: {
             filename,
-            mimeType: file.type || undefined,
+            mimeType: mimeType || undefined,
+            mediaType: image ? "image" : "document",
             whatsappMediaId: mediaId,
           },
         },
