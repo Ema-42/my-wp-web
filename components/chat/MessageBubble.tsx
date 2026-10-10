@@ -33,7 +33,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   const autoCaption = attachment
     ? attachment.mediaType === "image"
       ? `🖼️ ${attachment.filename}`
-      : `📎 ${attachment.filename}`
+      : attachment.mediaType === "audio"
+        ? "🎤 Nota de voz"
+        : `📎 ${attachment.filename}`
     : null;
   const hasOwnCaption = attachment && message.text && message.text !== autoCaption;
 
@@ -50,7 +52,22 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           color: colors.textPrimary,
         }}
       >
-        {attachment?.mediaType === "image" && attachment.whatsappMediaId ? (
+        {attachment?.mediaType === "audio" && attachment.whatsappMediaId ? (
+          <>
+            <audio
+              controls
+              preload="metadata"
+              className="h-10 w-56 max-w-full"
+              src={`/api/media/${attachment.whatsappMediaId}`}
+            />
+            <span
+              className="mt-1 block text-right text-[11px]"
+              style={{ color: colors.textSecondary }}
+            >
+              {formatTime(message.createdAt)}
+            </span>
+          </>
+        ) : attachment?.mediaType === "image" && attachment.whatsappMediaId ? (
           <>
             <div className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}

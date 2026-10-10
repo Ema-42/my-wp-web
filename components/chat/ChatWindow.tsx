@@ -6,6 +6,7 @@ import { MessageBubble } from "./MessageBubble";
 import { formatRemaining } from "./format";
 import { UserAvatar } from "./UserAvatar";
 import { useTheme } from "./ThemeContext";
+import { useVoiceRecorder } from "./useVoiceRecorder";
 import {
   WINDOW_CLOSED_ACCENT,
   WINDOW_CLOSED_BG,
@@ -15,22 +16,32 @@ import {
 
 type Props = {
   sessionId: string | null;
+  contactName: string | null;
   messages: ChatMessage[];
   loading: boolean;
   windowOpen: boolean;
   windowExpiresAt: string | null;
   onSend: (text: string) => Promise<void>;
   onSendFile: (file: File, caption?: string) => Promise<void>;
+  onSendAudio: (file: File) => Promise<void>;
 };
+
+function formatClock(totalSeconds: number) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export function ChatWindow({
   sessionId,
+  contactName,
   messages,
   loading,
   windowOpen,
   windowExpiresAt,
   onSend,
   onSendFile,
+  onSendAudio,
 }: Props) {
   const { colors } = useTheme();
   const [draft, setDraft] = useState("");
@@ -40,7 +51,8 @@ export function ChatWindow({
   const [, forceTick] = useState(0);
   const [dragActive, setDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [pendingCaption, setPendingCaption] = useState("");
+  const [sendingAudio, setSendingAudio] = useState(false);
+  const voiceRecorder = useVoiceRecorder();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
@@ -69,23 +81,39 @@ export function ChatWindow({
 
   function clearPending() {
     setPendingFiles([]);
-    setPendingCaption("");
   }
 
-  async function sendPendingFiles() {
+  async function sendPendingFiles(caption: string) {
     if (!pendingFiles.length || sendingFiles) return;
     setSendingFiles(true);
     setError(null);
     try {
       for (let i = 0; i < pendingFiles.length; i++) {
         const isLast = i === pendingFiles.length - 1;
-        await onSendFile(pendingFiles[i], isLast && pendingCaption ? pendingCaption : undefined);
+        await onSendFile(pendingFiles[i], isLast && caption ? caption : undefined);
       }
       clearPending();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo enviar");
     } finally {
       setSendingFiles(false);
+    }
+  }
+
+  async function sendRecordedAudio() {
+    if (!voiceRecorder.recording || sendingAudio) return;
+    setSendingAudio(true);
+    setError(null);
+    try {
+      const file = new File([voiceRecorder.recording.blob], "nota-de-voz.ogg", {
+        type: "audio/ogg",
+      });
+      await onSendAudio(file);
+      voiceRecorder.discard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo enviar la nota de voz");
+    } finally {
+      setSendingAudio(false);
     }
   }
 
@@ -116,12 +144,28 @@ export function ChatWindow({
     );
   }
 
-  const inputDisabled = sending || sendingFiles || !windowOpen;
+  const inputDisabled =
+    sending || sendingFiles || sendingAudio || !windowOpen;
+  const isRecording = voiceRecorder.state === "recording";
+  const isPreviewingAudio = voiceRecorder.state === "preview";
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (inputDisabled) return;
     const text = draft.trim();
-    if (!text || inputDisabled) return;
+
+    if (isPreviewingAudio) {
+      await sendRecordedAudio();
+      return;
+    }
+
+    if (pendingFiles.length > 0) {
+      await sendPendingFiles(text);
+      setDraft("");
+      return;
+    }
+
+    if (!text) return;
 
     setSending(true);
     setError(null);
@@ -187,9 +231,14 @@ export function ChatWindow({
         <UserAvatar seed={sessionId} size={40} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-[15px] font-medium" style={{ color: colors.textPrimary }}>
-              +{sessionId}
+            <p className="truncate text-[15px] font-medium" style={{ color: colors.textPrimary }}>
+              {contactName?.trim() || `+${sessionId}`}
             </p>
+            {contactName?.trim() && (
+              <span className="shrink-0 text-xs" style={{ color: colors.textSecondary }}>
+                +{sessionId}
+              </span>
+            )}
             {windowOpen ? (
               <span
                 className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
@@ -227,9 +276,13 @@ export function ChatWindow({
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {loading && messages.length === 0 ? (
+            <MessageListSkeleton />
+          ) : (
+            messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))
+          )}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -253,8 +306,25 @@ export function ChatWindow({
           className="border-t px-4 pb-3 pt-3 transition-colors"
           style={{ background: colors.bgSecondary, borderColor: colors.border }}
         >
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs" style={{ color: colors.textSecondary }}>
+              {pendingFiles.length}{" "}
+              {pendingFiles.length === 1 ? "archivo listo" : "archivos listos"} para
+              enviar
+            </span>
+            <button
+              onClick={clearPending}
+              disabled={sendingFiles}
+              className="rounded-full px-2 py-1 text-xs transition-colors hover:bg-black/5 disabled:opacity-40"
+              style={{ color: colors.textSecondary }}
+              aria-label="Cancelar envío de archivos"
+            >
+              Cancelar
+            </button>
+          </div>
+
           {/* File thumbnails */}
-          <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+          <div className="flex gap-2 overflow-x-auto pb-1">
             {pendingFiles.map((file, i) => (
               <div key={i} className="relative shrink-0">
                 {file.type.startsWith("image/") ? (
@@ -300,49 +370,13 @@ export function ChatWindow({
               <span className="text-[10px]">Agregar</span>
             </button>
           </div>
-
-          {/* Caption input + actions */}
-          <div className="flex items-center gap-2">
-            <input
-              value={pendingCaption}
-              onChange={(e) => setPendingCaption(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPendingFiles(); }
-              }}
-              placeholder="Agregar un mensaje..."
-              disabled={sendingFiles}
-              autoFocus
-              className="flex-1 rounded-lg px-4 py-2 text-sm outline-none disabled:opacity-60"
-              style={{ background: colors.inputBg, color: colors.textPrimary }}
-            />
-            <button
-              onClick={clearPending}
-              disabled={sendingFiles}
-              className="shrink-0 rounded-full px-3 py-2 text-sm transition-colors hover:bg-black/5 disabled:opacity-40"
-              style={{ color: colors.textSecondary }}
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={sendPendingFiles}
-              disabled={sendingFiles}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity disabled:opacity-50"
-              aria-label="Enviar archivos"
-              title={`Enviar ${pendingFiles.length} ${pendingFiles.length === 1 ? "archivo" : "archivos"}`}
-            >
-              {sendingFiles ? (
-                <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
-                  <path d="M12 2a10 10 0 0 1 10 10" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 translate-x-[-1px]">
-                  <path d="M3 20l18-8L3 4v6l12 2-12 2z" />
-                </svg>
-              )}
-            </button>
-          </div>
         </div>
+      )}
+
+      {voiceRecorder.error && (
+        <p className="bg-[#fde2e1] px-4 py-2 text-center text-sm text-[#8b1a1a]">
+          {voiceRecorder.error}
+        </p>
       )}
 
       <form
@@ -357,47 +391,174 @@ export function ChatWindow({
           onChange={handleFileChange}
           className="hidden"
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={inputDisabled}
-          title={windowOpen ? "Adjuntar archivo" : "Ventana vencida: no puedes adjuntar"}
-          aria-label="Adjuntar archivo"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
-          style={{ color: colors.textSecondary }}
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-            <path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6z" />
-          </svg>
-        </button>
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={
-            windowOpen ? "Escribe un mensaje" : "Ventana vencida: no puedes escribir"
-          }
-          disabled={inputDisabled}
-          className="flex-1 rounded-lg px-4 py-2 text-sm outline-none disabled:opacity-60"
-          style={{
-            background: colors.inputBg,
-            color: colors.textPrimary,
-          }}
-        />
-        <button
-          type="submit"
-          disabled={inputDisabled || !draft.trim()}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity disabled:opacity-40"
-          aria-label="Enviar mensaje"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            className="h-5 w-5 translate-x-[-1px]"
-          >
-            <path d="M3 20l18-8L3 4v6l12 2-12 2z" />
-          </svg>
-        </button>
+
+        {isRecording ? (
+          <>
+            <button
+              type="button"
+              onClick={voiceRecorder.cancel}
+              title="Cancelar grabación"
+              aria-label="Cancelar grabación"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5"
+              style={{ color: colors.textSecondary }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM9 17l-3-3 1.4-1.4L9 14.2l4.6-4.6L15 11l-6 6z" />
+              </svg>
+            </button>
+            <div className="flex flex-1 items-center gap-2 px-2">
+              <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+              <span className="text-sm" style={{ color: colors.textPrimary }}>
+                Grabando… {formatClock(voiceRecorder.seconds)}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={voiceRecorder.stop}
+              title="Detener grabación"
+              aria-label="Detener grabación"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+              </svg>
+            </button>
+          </>
+        ) : isPreviewingAudio && voiceRecorder.recording ? (
+          <>
+            <button
+              type="button"
+              onClick={voiceRecorder.discard}
+              disabled={sendingAudio}
+              title="Descartar nota de voz"
+              aria-label="Descartar nota de voz"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
+              style={{ color: colors.textSecondary }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <path d="M6 7h12v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7zm2-3h8l1 2h4v2H3V6h4l1-2z" />
+              </svg>
+            </button>
+            <div className="flex flex-1 items-center gap-2 px-1">
+              <audio
+                controls
+                autoPlay={false}
+                src={voiceRecorder.recording.url}
+                className="h-10 w-full"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={sendingAudio}
+              title="Enviar nota de voz"
+              aria-label="Enviar nota de voz"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity disabled:opacity-50"
+            >
+              {sendingAudio ? (
+                <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 translate-x-[-1px]">
+                  <path d="M3 20l18-8L3 4v6l12 2-12 2z" />
+                </svg>
+              )}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={inputDisabled}
+              title={windowOpen ? "Adjuntar archivo" : "Ventana vencida: no puedes adjuntar"}
+              aria-label="Adjuntar archivo"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
+              style={{ color: colors.textSecondary }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6z" />
+              </svg>
+            </button>
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={
+                !windowOpen
+                  ? "Ventana vencida: no puedes escribir"
+                  : pendingFiles.length > 0
+                    ? "Agregar un mensaje..."
+                    : "Escribe un mensaje"
+              }
+              disabled={inputDisabled}
+              autoFocus={pendingFiles.length > 0}
+              className="flex-1 rounded-lg px-4 py-2 text-sm outline-none disabled:opacity-60"
+              style={{
+                background: colors.inputBg,
+                color: colors.textPrimary,
+              }}
+            />
+            {draft.trim() || pendingFiles.length > 0 ? (
+              <button
+                type="submit"
+                disabled={inputDisabled}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity disabled:opacity-40"
+                aria-label="Enviar mensaje"
+              >
+                {sendingFiles ? (
+                  <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
+                    <path d="M12 2a10 10 0 0 1 10 10" />
+                  </svg>
+                ) : (
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="h-5 w-5 translate-x-[-1px]"
+                  >
+                    <path d="M3 20l18-8L3 4v6l12 2-12 2z" />
+                  </svg>
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={voiceRecorder.start}
+                disabled={inputDisabled}
+                title={windowOpen ? "Grabar nota de voz" : "Ventana vencida: no puedes grabar"}
+                aria-label="Grabar nota de voz"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
+                style={{ color: colors.textSecondary }}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                  <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+                </svg>
+              </button>
+            )}
+          </>
+        )}
       </form>
     </div>
+  );
+}
+
+function MessageListSkeleton() {
+  const { colors } = useTheme();
+  const widths = ["w-40", "w-56", "w-28", "w-64", "w-44"];
+  return (
+    <>
+      {widths.map((w, i) => (
+        <div
+          key={i}
+          className={`flex ${i % 2 === 0 ? "justify-start" : "justify-end"}`}
+        >
+          <div
+            className={`h-9 ${w} max-w-[75%] animate-pulse rounded-lg`}
+            style={{ background: colors.bgTertiary }}
+          />
+        </div>
+      ))}
+    </>
   );
 }

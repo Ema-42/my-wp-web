@@ -138,6 +138,49 @@ export async function sendWhatsAppDocument(
 }
 
 /**
+ * POST /{Phone-Number-ID}/messages — Send Audio Message by ID
+ * Meta renders this as a native voice-note bubble only when the uploaded
+ * media is an .ogg file using the Opus codec; captions are not supported.
+ */
+export async function sendWhatsAppAudio(
+  to: string,
+  mediaId: string
+): Promise<SendMediaResult> {
+  if (!API_VERSION || !PHONE_NUMBER_ID || !ACCESS_TOKEN) {
+    throw new Error("Faltan variables de entorno de WhatsApp (.env)");
+  }
+
+  const res = await fetch(
+    `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "audio",
+        audio: { id: mediaId },
+      }),
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    const message =
+      (data?.error?.message as string | undefined) ??
+      "Error enviando la nota de voz de WhatsApp";
+    throw new Error(message);
+  }
+
+  return data as SendMediaResult;
+}
+
+/**
  * POST /{Phone-Number-ID}/messages — Send Image Message by ID
  * The image renders inline in the recipient's chat (not as a download).
  */

@@ -19,6 +19,7 @@ export type WindowFilter = "all" | "open" | "closed";
 
 type Props = {
   chats: ChatSummary[];
+  loading: boolean;
   selectedSessionId: string | null;
   onSelect: (sessionId: string) => void;
   search: string;
@@ -29,8 +30,13 @@ type Props = {
   onToggleCollapsed: () => void;
 };
 
+function displayName(chat: ChatSummary) {
+  return chat.contactName?.trim() || `+${chat.sessionId}`;
+}
+
 export function ChatSidebar({
   chats,
+  loading,
   selectedSessionId,
   onSelect,
   search,
@@ -40,9 +46,13 @@ export function ChatSidebar({
   collapsed,
   onToggleCollapsed,
 }: Props) {
+  const term = search.trim().toLowerCase();
   const filtered = chats
     .filter((chat) =>
-      search.trim() ? chat.sessionId.includes(search.trim()) : true
+      term
+        ? chat.sessionId.includes(term) ||
+          (chat.contactName?.toLowerCase().includes(term) ?? false)
+        : true
     )
     .filter((chat) => {
       if (windowFilter === "open") return chat.windowOpen;
@@ -112,15 +122,26 @@ export function ChatSidebar({
                 className="flex items-center justify-center rounded-full p-1 transition"
                 style={active ? { background: colors.activeBg } : {}}
               >
-                <div
-                  className="rounded-full border-2 p-[3px] transition-colors"
-                  style={{
-                    borderColor: chat.windowOpen
-                      ? WINDOW_OPEN_RING
-                      : WINDOW_CLOSED_RING,
-                  }}
-                >
-                  <UserAvatar seed={chat.sessionId} size={36} />
+                <div className="relative">
+                  <div
+                    className="rounded-full border-2 p-[3px] transition-colors"
+                    style={{
+                      borderColor: chat.windowOpen
+                        ? WINDOW_OPEN_RING
+                        : WINDOW_CLOSED_RING,
+                    }}
+                  >
+                    <UserAvatar seed={chat.sessionId} size={36} />
+                  </div>
+                  {chat.unread && (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2"
+                      style={{
+                        background: "#00a884",
+                        borderColor: colors.bgPrimary,
+                      }}
+                    />
+                  )}
                 </div>
               </button>
             );
@@ -132,7 +153,7 @@ export function ChatSidebar({
             className="pointer-events-none fixed z-50 w-max max-w-[240px] -translate-y-1/2 rounded-lg px-3 py-2 text-xs text-white shadow-lg"
             style={{ left: 72, top: hovered.top, background: colors.tooltipBg }}
           >
-            <p className="font-medium" style={{ color: colors.textPrimary }}>+{hovered.chat.sessionId}</p>
+            <p className="font-medium" style={{ color: colors.textPrimary }}>{displayName(hovered.chat)}</p>
             <p
               style={{ color: hovered.chat.windowOpen ? "#8fe3ab" : "#ffb3b0" }}
             >
@@ -214,7 +235,7 @@ export function ChatSidebar({
         <input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Buscar un chat por número"
+          placeholder="Buscar un chat por nombre o número"
           className="w-full rounded-lg px-4 py-2 text-sm outline-none"
           style={{
             background: colors.searchBg,
@@ -268,13 +289,17 @@ export function ChatSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {filtered.length === 0 ? (
+        {loading && chats.length === 0 ? (
+          <ChatListSkeleton />
+        ) : filtered.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm" style={{ color: colors.textSecondary }}>
             No hay chats todavía
           </p>
         ) : (
           filtered.map((chat) => {
             const active = chat.sessionId === selectedSessionId;
+            const name = displayName(chat);
+            const showNumberSubtitle = Boolean(chat.contactName?.trim());
             return (
               <button
                 key={chat.sessionId}
@@ -308,17 +333,47 @@ export function ChatSidebar({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[15px] font-medium" style={{ color: colors.textPrimary }}>
-                      +{chat.sessionId}
+                    <span
+                      className="truncate text-[15px]"
+                      style={{
+                        color: colors.textPrimary,
+                        fontWeight: chat.unread ? 700 : 500,
+                      }}
+                    >
+                      {name}
+                      {showNumberSubtitle && (
+                        <span
+                          className="ml-1.5 truncate text-xs font-normal"
+                          style={{ color: colors.textSecondary }}
+                        >
+                          +{chat.sessionId}
+                        </span>
+                      )}
                     </span>
                     <span className="shrink-0 text-xs" style={{ color: colors.textSecondary }}>
                       {formatListTimestamp(chat.lastAt)}
                     </span>
                   </div>
-                  <p className="truncate text-sm" style={{ color: colors.textSecondary }}>
-                    {chat.lastRole === "bot" ? "Tú: " : ""}
-                    {chat.lastMessage}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p
+                      className="truncate text-sm"
+                      style={{
+                        color: chat.unread ? colors.textPrimary : colors.textSecondary,
+                        fontWeight: chat.unread ? 600 : 400,
+                      }}
+                    >
+                      {chat.lastRole === "bot" ? "Tú: " : ""}
+                      {chat.lastMessage}
+                    </p>
+                    {chat.unread && (
+                      <span
+                        className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white"
+                        style={{ background: "#00a884" }}
+                      >
+                        •
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             );
@@ -326,5 +381,35 @@ export function ChatSidebar({
         )}
       </div>
     </aside>
+  );
+}
+
+function ChatListSkeleton() {
+  const { colors } = useTheme();
+  return (
+    <div className="flex flex-col">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 border-b px-4 py-3"
+          style={{ borderColor: colors.border }}
+        >
+          <div
+            className="h-12 w-12 shrink-0 animate-pulse rounded-full"
+            style={{ background: colors.bgTertiary }}
+          />
+          <div className="min-w-0 flex-1">
+            <div
+              className="mb-2 h-3.5 w-2/5 animate-pulse rounded"
+              style={{ background: colors.bgTertiary }}
+            />
+            <div
+              className="h-3 w-4/5 animate-pulse rounded"
+              style={{ background: colors.bgTertiary }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

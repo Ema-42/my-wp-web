@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { pool, CHAT_HISTORY_TABLE } from "@/lib/db";
+import { pool, CHAT_HISTORY_TABLE, CONTACTS_TABLE } from "@/lib/db";
 import { parseChatMessage } from "@/lib/chat-message";
 import { getServiceWindow } from "@/lib/window";
 
@@ -26,10 +26,13 @@ export async function GET() {
       c.total,
       c.last_at,
       l.message AS last_message,
-      lc.last_contact_at
+      lc.last_contact_at,
+      ct.nombre AS contact_name,
+      ct.ultimo_leido_at
     FROM counts c
     JOIN last_msg l ON l.session_id = c.session_id
     LEFT JOIN last_contact_msg lc ON lc.session_id = c.session_id
+    LEFT JOIN ${CONTACTS_TABLE} ct ON ct.numero = c.session_id
     ORDER BY c.last_at DESC
   `);
 
@@ -40,8 +43,18 @@ export async function GET() {
       : null;
     const serviceWindow = getServiceWindow(lastContactAt);
 
+    // "No leído" = el contacto escribió algo después de la última vez que
+    // un operador abrió este chat (ultimo_leido_at). No tiene relación con
+    // los ticks de lectura de WhatsApp (eso es entre el bot y el contacto).
+    const unread =
+      lastContactAt !== null &&
+      (!row.ultimo_leido_at ||
+        new Date(row.ultimo_leido_at).getTime() <
+          new Date(lastContactAt).getTime());
+
     return {
       sessionId: row.session_id as string,
+      contactName: (row.contact_name as string | null) ?? null,
       total: row.total as number,
       lastAt: row.last_at as Date,
       lastMessage: parsed.text,
@@ -49,6 +62,7 @@ export async function GET() {
       lastContactAt,
       windowOpen: serviceWindow.open,
       windowExpiresAt: serviceWindow.expiresAt,
+      unread,
     };
   });
 
