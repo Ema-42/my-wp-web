@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 export type ThemeColors = {
   bgPrimary: string;
@@ -67,6 +67,13 @@ const ThemeContext = createContext<ThemeContextValue>({
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [dark, setDark] = useState(false);
+
+  // Expuesto como atributo del documento para lo poco que React no puede
+  // themar con `style` inline: la barra de scroll nativa (ver globals.css).
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  }, [dark]);
+
   return (
     <ThemeContext.Provider
       value={{ dark, toggle: () => setDark((d) => !d), colors: dark ? DARK : LIGHT }}

@@ -53,9 +53,30 @@ export function ChatWindow({
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [sendingAudio, setSendingAudio] = useState(false);
   const voiceRecorder = useVoiceRecorder();
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const pinnedToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
+
+  // "Pegado" al final = el usuario no scrolleó hacia arriba a leer mensajes
+  // viejos. Solo en ese caso seguimos el scroll automático con cada mensaje
+  // nuevo (igual que WhatsApp Web); si está leyendo historial, no lo movemos.
+  function handleMessagesScroll() {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const pinned = distanceFromBottom < 120;
+    pinnedToBottomRef.current = pinned;
+    setShowScrollToBottom(!pinned);
+  }
+
+  function scrollToBottom() {
+    pinnedToBottomRef.current = true;
+    setShowScrollToBottom(false);
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }
 
   function getObjectUrl(file: File): string {
     const key = `${file.name}-${file.size}-${file.lastModified}`;
@@ -117,9 +138,20 @@ export function ChatWindow({
     }
   }
 
+  // Cambiaste de chat: siempre arranca mostrando el mensaje más reciente.
   useEffect(() => {
+    pinnedToBottomRef.current = true;
+    setShowScrollToBottom(false);
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, sessionId]);
+  }, [sessionId]);
+
+  // Llegaron mensajes nuevos (polling o envío propio): solo seguimos el
+  // scroll si el usuario ya estaba al final.
+  useEffect(() => {
+    if (pinnedToBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
+  }, [messages]);
 
   // Re-render every 30s so the "vence en Xh Ym" countdown stays accurate.
   useEffect(() => {
@@ -155,11 +187,13 @@ export function ChatWindow({
     const text = draft.trim();
 
     if (isPreviewingAudio) {
+      pinnedToBottomRef.current = true;
       await sendRecordedAudio();
       return;
     }
 
     if (pendingFiles.length > 0) {
+      pinnedToBottomRef.current = true;
       await sendPendingFiles(text);
       setDraft("");
       return;
@@ -167,6 +201,7 @@ export function ChatWindow({
 
     if (!text) return;
 
+    pinnedToBottomRef.current = true;
     setSending(true);
     setError(null);
     try {
@@ -180,9 +215,12 @@ export function ChatWindow({
   }
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files;
+    // event.target.files es una FileList en vivo: resetear .value más abajo
+    // (para poder re-seleccionar el mismo archivo después) también la vacía
+    // a ella, así que hay que copiarla a un array propio primero.
+    const files = event.target.files ? Array.from(event.target.files) : [];
     event.target.value = "";
-    if (!files || !files.length) return;
+    if (!files.length) return;
     addPendingFiles(files);
   }
 
@@ -274,7 +312,11 @@ export function ChatWindow({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleMessagesScroll}
+        className="relative flex-1 overflow-y-auto px-6 py-4"
+      >
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
           {loading && messages.length === 0 ? (
             <MessageListSkeleton />
@@ -285,6 +327,23 @@ export function ChatWindow({
           )}
           <div ref={bottomRef} />
         </div>
+
+        {showScrollToBottom && (
+          <div className="sticky bottom-2 flex justify-end pr-1">
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              title="Ir al último mensaje"
+              aria-label="Ir al último mensaje"
+              className="flex h-10 w-10 items-center justify-center rounded-full shadow-md transition-colors hover:brightness-95"
+              style={{ background: colors.bgPrimary, color: colors.textSecondary }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <path d="M12 16.5 4.5 9l1.4-1.4L12 13.7l6.1-6.1L19.5 9z" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
 
       {error && (
