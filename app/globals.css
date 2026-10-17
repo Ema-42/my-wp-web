@@ -67,3 +67,45 @@ body {
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.35);
 }
+
+/*
+ * Respuesta táctil: quita el delay de 300ms y el flash gris nativo de
+ * iOS/Android en botones, así los estados hover/active propios (ver
+ * componentes de chat) son los únicos que se ven.
+ */
+button,
+a,
+input,
+textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-enter {
+  animation: message-in 220ms ease-out both;
+}
+
+/* prefers-reduced-motion: cubre tanto la keyframe de arriba como las
+   transiciones utilitarias de Tailwind (transition-colors, transition-opacity,
+   etc.) usadas en toda la app de chat. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

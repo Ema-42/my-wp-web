@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { ChatSummary } from "@/lib/types";
 import { formatListTimestamp } from "./format";
 import { UserAvatar } from "./UserAvatar";
@@ -17,6 +17,9 @@ import {
 
 export type WindowFilter = "all" | "open" | "closed";
 
+const FOCUS_RING =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a884]";
+
 type Props = {
   chats: ChatSummary[];
   loading: boolean;
@@ -28,6 +31,8 @@ type Props = {
   onWindowFilterChange: (value: WindowFilter) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** "mobile" = full-bleed pane (phone/tablet nav), "desktop" = fixed-width column. */
+  variant?: "desktop" | "mobile";
 };
 
 function displayName(chat: ChatSummary) {
@@ -45,7 +50,9 @@ export function ChatSidebar({
   onWindowFilterChange,
   collapsed,
   onToggleCollapsed,
+  variant = "desktop",
 }: Props) {
+  const isMobile = variant === "mobile";
   const term = search.trim().toLowerCase();
   const filtered = chats
     .filter((chat) =>
@@ -66,7 +73,7 @@ export function ChatSidebar({
     null
   );
 
-  if (collapsed) {
+  if (collapsed && !isMobile) {
     return (
       <aside
         className="flex h-full w-16 shrink-0 flex-col items-center border-r py-3 transition-colors"
@@ -75,7 +82,8 @@ export function ChatSidebar({
         <button
           onClick={onToggleCollapsed}
           title="Expandir lista de chats"
-          className="mb-3 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full ring-2 ring-transparent transition hover:ring-[#00a884]"
+          aria-label="Expandir lista de chats"
+          className={`mb-3 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full ring-2 ring-transparent transition hover:ring-[#00a884] active:scale-95 ${FOCUS_RING}`}
         >
           <Image
             src="/icon_wp.png"
@@ -89,7 +97,8 @@ export function ChatSidebar({
         <button
           onClick={toggleDark}
           title={dark ? "Modo claro" : "Modo oscuro"}
-          className="mb-2 flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-black/5"
+          aria-label={dark ? "Activar modo claro" : "Activar modo oscuro"}
+          className={`mb-2 flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
           style={{ color: colors.textSecondary }}
         >
           {dark ? (
@@ -119,8 +128,16 @@ export function ChatSidebar({
                   })
                 }
                 onMouseLeave={() => setHovered(null)}
-                className="flex items-center justify-center rounded-full p-1 transition"
-                style={active ? { background: colors.activeBg } : {}}
+                aria-label={displayName(chat)}
+                aria-current={active ? "true" : undefined}
+                className={`flex items-center justify-center rounded-full p-1 transition active:scale-95 ${
+                  active ? "" : "hover:bg-[var(--row-hover)]"
+                } ${FOCUS_RING}`}
+                style={
+                  active
+                    ? { background: colors.activeBg }
+                    : ({ "--row-hover": colors.hoverBg } as CSSProperties)
+                }
               >
                 <div className="relative">
                   <div
@@ -172,38 +189,57 @@ export function ChatSidebar({
 
   return (
     <aside
-      className="flex h-full w-full max-w-[420px] min-w-[320px] shrink-0 flex-col border-r transition-colors"
+      className={`flex h-full w-full shrink-0 flex-col border-r transition-colors ${
+        isMobile ? "" : "max-w-[420px] min-w-[320px]"
+      }`}
       style={{ background: colors.bgPrimary, borderColor: colors.border }}
     >
       <div
         className="flex items-center justify-between px-4 py-3"
         style={{ background: colors.bgSecondary }}
       >
-        <button
-          onClick={onToggleCollapsed}
-          title="Ocultar lista de chats"
-          className="flex items-center gap-3"
-        >
-          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
-            <Image
-              src="/icon_wp.png"
-              alt="Asistente WhatsApp"
-              width={40}
-              height={40}
-              className="h-10 w-10 object-cover"
-            />
-          </div>
-          <span className="text-[15px] font-medium" style={{ color: colors.textPrimary }}>
-            Asistente WhatsApp
+        {isMobile ? (
+          <span className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
+              <Image
+                src="/icon_wp.png"
+                alt="Asistente WhatsApp"
+                width={40}
+                height={40}
+                className="h-10 w-10 object-cover"
+              />
+            </div>
+            <span className="text-[15px] font-medium" style={{ color: colors.textPrimary }}>
+              Asistente WhatsApp
+            </span>
           </span>
-        </button>
+        ) : (
+          <button
+            onClick={onToggleCollapsed}
+            title="Ocultar lista de chats"
+            className={`flex items-center gap-3 rounded-lg ${FOCUS_RING}`}
+          >
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
+              <Image
+                src="/icon_wp.png"
+                alt="Asistente WhatsApp"
+                width={40}
+                height={40}
+                className="h-10 w-10 object-cover"
+              />
+            </div>
+            <span className="text-[15px] font-medium" style={{ color: colors.textPrimary }}>
+              Asistente WhatsApp
+            </span>
+          </button>
+        )}
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <button
             onClick={toggleDark}
             title={dark ? "Modo claro" : "Modo oscuro"}
             aria-label={dark ? "Activar modo claro" : "Activar modo oscuro"}
-            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-black/5"
+            className={`flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
             style={{ color: colors.textSecondary }}
           >
             {dark ? (
@@ -217,17 +253,19 @@ export function ChatSidebar({
             )}
           </button>
 
-          <button
-            onClick={onToggleCollapsed}
-            title="Ocultar lista de chats"
-            aria-label="Ocultar lista de chats"
-            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-black/5"
-            style={{ color: colors.textSecondary }}
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-              <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
-            </svg>
-          </button>
+          {!isMobile && (
+            <button
+              onClick={onToggleCollapsed}
+              title="Ocultar lista de chats"
+              aria-label="Ocultar lista de chats"
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
+              style={{ color: colors.textSecondary }}
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -236,7 +274,7 @@ export function ChatSidebar({
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Buscar un chat por nombre o número"
-          className="w-full rounded-lg px-4 py-2 text-sm outline-none"
+          className={`w-full rounded-lg px-4 py-2.5 text-[16px] outline-none sm:text-sm ${FOCUS_RING}`}
           style={{
             background: colors.searchBg,
             color: colors.textPrimary,
@@ -246,7 +284,7 @@ export function ChatSidebar({
         <div className="mt-2 flex gap-2">
           <button
             onClick={() => onWindowFilterChange("all")}
-            className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            className={`min-h-[32px] rounded-full px-3.5 py-1.5 text-xs font-medium transition active:scale-95 ${FOCUS_RING}`}
             style={
               windowFilter === "all"
                 ? { background: colors.bgTertiary, color: colors.textPrimary }
@@ -257,7 +295,7 @@ export function ChatSidebar({
           </button>
           <button
             onClick={() => onWindowFilterChange("open")}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            className={`flex min-h-[32px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition active:scale-95 ${FOCUS_RING}`}
             style={
               windowFilter === "open"
                 ? { backgroundColor: WINDOW_OPEN_BG, color: WINDOW_OPEN_ACCENT }
@@ -272,7 +310,7 @@ export function ChatSidebar({
           </button>
           <button
             onClick={() => onWindowFilterChange("closed")}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            className={`flex min-h-[32px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition active:scale-95 ${FOCUS_RING}`}
             style={
               windowFilter === "closed"
                 ? { backgroundColor: WINDOW_CLOSED_BG, color: WINDOW_CLOSED_ACCENT }
@@ -304,17 +342,19 @@ export function ChatSidebar({
               <button
                 key={chat.sessionId}
                 onClick={() => onSelect(chat.sessionId)}
-                className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors"
-                style={{
-                  borderColor: colors.border,
-                  background: active ? colors.activeBg : "transparent",
-                }}
-                onMouseEnter={(e) => {
-                  if (!active) (e.currentTarget as HTMLElement).style.background = colors.hoverBg;
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) (e.currentTarget as HTMLElement).style.background = "transparent";
-                }}
+                aria-current={active ? "true" : undefined}
+                className={`flex w-full items-center gap-3 border-b px-4 py-3 text-left transition ${
+                  active ? "" : "hover:bg-[var(--row-hover)] active:bg-[var(--row-active)]"
+                } ${FOCUS_RING}`}
+                style={
+                  active
+                    ? { borderColor: colors.border, background: colors.activeBg }
+                    : ({
+                        borderColor: colors.border,
+                        "--row-hover": colors.hoverBg,
+                        "--row-active": colors.activeBg,
+                      } as CSSProperties)
+                }
               >
                 <div
                   className="shrink-0 rounded-full border-2 p-[3px] transition-colors"

@@ -24,7 +24,12 @@ type Props = {
   onSend: (text: string) => Promise<void>;
   onSendFile: (file: File, caption?: string) => Promise<void>;
   onSendAudio: (file: File) => Promise<void>;
+  /** Present only on mobile: returns to the chat list pane. */
+  onBack?: () => void;
 };
+
+const FOCUS_RING =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a884]";
 
 function formatClock(totalSeconds: number) {
   const m = Math.floor(totalSeconds / 60);
@@ -42,6 +47,7 @@ export function ChatWindow({
   onSend,
   onSendFile,
   onSendAudio,
+  onBack,
 }: Props) {
   const { colors } = useTheme();
   const [draft, setDraft] = useState("");
@@ -263,20 +269,36 @@ export function ChatWindow({
         </div>
       )}
       <header
-        className="flex items-center gap-3 border-b px-4 py-2.5 transition-colors"
+        className="flex items-center gap-2 border-b px-3 py-2.5 transition-colors sm:gap-3 sm:px-4"
         style={{ background: colors.bgSecondary, borderColor: colors.border }}
       >
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            title="Volver a los chats"
+            aria-label="Volver a los chats"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
+            style={{ color: colors.textSecondary }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+              <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+            </svg>
+          </button>
+        )}
         <UserAvatar seed={sessionId} size={40} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-baseline gap-1.5">
             <p className="truncate text-[15px] font-medium" style={{ color: colors.textPrimary }}>
               {contactName?.trim() || `+${sessionId}`}
             </p>
             {contactName?.trim() && (
-              <span className="shrink-0 text-xs" style={{ color: colors.textSecondary }}>
+              <span className="hidden shrink-0 text-xs sm:inline" style={{ color: colors.textSecondary }}>
                 +{sessionId}
               </span>
             )}
+          </div>
+          <div className="mt-0.5 flex items-center gap-2">
             {windowOpen ? (
               <span
                 className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
@@ -301,21 +323,21 @@ export function ChatWindow({
                 Ventana vencida
               </span>
             )}
+            <span className="truncate text-xs" style={{ color: colors.textSecondary }}>
+              {sendingFiles
+                ? "Enviando archivos..."
+                : loading
+                  ? "Cargando..."
+                  : `${messages.length} mensajes`}
+            </span>
           </div>
-          <p className="text-xs" style={{ color: colors.textSecondary }}>
-            {sendingFiles
-              ? "Enviando archivos..."
-              : loading
-                ? "Cargando..."
-                : `${messages.length} mensajes`}
-          </p>
         </div>
       </header>
 
       <div
         ref={scrollContainerRef}
         onScroll={handleMessagesScroll}
-        className="relative flex-1 overflow-y-auto px-6 py-4"
+        className="relative flex-1 overflow-y-auto px-3 py-3 sm:px-6 sm:py-4"
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
           {loading && messages.length === 0 ? (
@@ -335,7 +357,7 @@ export function ChatWindow({
               onClick={scrollToBottom}
               title="Ir al último mensaje"
               aria-label="Ir al último mensaje"
-              className="flex h-10 w-10 items-center justify-center rounded-full shadow-md transition-colors hover:brightness-95"
+              className={`flex h-10 w-10 items-center justify-center rounded-full shadow-md transition hover:brightness-95 active:scale-95 ${FOCUS_RING}`}
               style={{ background: colors.bgPrimary, color: colors.textSecondary }}
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
@@ -374,7 +396,7 @@ export function ChatWindow({
             <button
               onClick={clearPending}
               disabled={sendingFiles}
-              className="rounded-full px-2 py-1 text-xs transition-colors hover:bg-black/5 disabled:opacity-40"
+              className={`rounded-full px-3 py-1.5 text-xs transition hover:bg-black/5 active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
               style={{ color: colors.textSecondary }}
               aria-label="Cancelar envío de archivos"
             >
@@ -408,7 +430,7 @@ export function ChatWindow({
                 )}
                 <button
                   onClick={() => removePendingFile(i)}
-                  className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white text-xs hover:bg-black/80"
+                  className={`absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs text-white transition hover:bg-black/80 active:scale-95 ${FOCUS_RING}`}
                   aria-label="Quitar archivo"
                 >
                   ×
@@ -419,7 +441,7 @@ export function ChatWindow({
             {/* Add more files button */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex h-24 w-24 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed transition-colors hover:bg-black/5"
+              className={`flex h-24 w-24 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
               style={{ borderColor: colors.border, color: colors.textSecondary }}
               title="Agregar más archivos"
             >
@@ -440,7 +462,7 @@ export function ChatWindow({
 
       <form
         onSubmit={handleSubmit}
-        className="flex items-center gap-2 border-t px-4 py-3 transition-colors"
+        className="flex items-center gap-2 border-t px-3 py-2.5 transition-colors sm:px-4 sm:py-3"
         style={{ background: colors.bgSecondary, borderColor: colors.border }}
       >
         <input
@@ -458,7 +480,7 @@ export function ChatWindow({
               onClick={voiceRecorder.cancel}
               title="Cancelar grabación"
               aria-label="Cancelar grabación"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
               style={{ color: colors.textSecondary }}
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
@@ -476,7 +498,7 @@ export function ChatWindow({
               onClick={voiceRecorder.stop}
               title="Detener grabación"
               aria-label="Detener grabación"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition active:scale-95 ${FOCUS_RING}`}
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
                 <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -491,7 +513,7 @@ export function ChatWindow({
               disabled={sendingAudio}
               title="Descartar nota de voz"
               aria-label="Descartar nota de voz"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
               style={{ color: colors.textSecondary }}
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
@@ -511,7 +533,7 @@ export function ChatWindow({
               disabled={sendingAudio}
               title="Enviar nota de voz"
               aria-label="Enviar nota de voz"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity disabled:opacity-50"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition active:scale-95 disabled:opacity-50 ${FOCUS_RING}`}
             >
               {sendingAudio ? (
                 <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -533,7 +555,7 @@ export function ChatWindow({
               disabled={inputDisabled}
               title={windowOpen ? "Adjuntar archivo" : "Ventana vencida: no puedes adjuntar"}
               aria-label="Adjuntar archivo"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
               style={{ color: colors.textSecondary }}
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
@@ -552,7 +574,7 @@ export function ChatWindow({
               }
               disabled={inputDisabled}
               autoFocus={pendingFiles.length > 0}
-              className="flex-1 rounded-lg px-4 py-2 text-sm outline-none disabled:opacity-60"
+              className={`flex-1 rounded-lg px-4 py-2 text-[16px] outline-none disabled:opacity-60 sm:text-sm ${FOCUS_RING}`}
               style={{
                 background: colors.inputBg,
                 color: colors.textPrimary,
@@ -562,7 +584,7 @@ export function ChatWindow({
               <button
                 type="submit"
                 disabled={inputDisabled}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition-opacity disabled:opacity-40"
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
                 aria-label="Enviar mensaje"
               >
                 {sendingFiles ? (
@@ -587,7 +609,7 @@ export function ChatWindow({
                 disabled={inputDisabled}
                 title={windowOpen ? "Grabar nota de voz" : "Ventana vencida: no puedes grabar"}
                 aria-label="Grabar nota de voz"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/5 disabled:opacity-40"
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
                 style={{ color: colors.textSecondary }}
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">

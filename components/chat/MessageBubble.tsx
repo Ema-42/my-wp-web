@@ -40,7 +40,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
   const hasOwnCaption = attachment && message.text && message.text !== autoCaption;
 
   return (
-    <div className={`flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
+    <div className={`message-enter flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
       <div
         className={`overflow-hidden rounded-lg shadow-sm ${
           attachment?.mediaType === "image" && attachment.whatsappMediaId
@@ -81,7 +81,8 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 href={`/api/media/${attachment.whatsappMediaId}`}
                 download={attachment.filename}
                 title="Descargar imagen"
-                className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition hover:bg-black/60"
+                aria-label="Descargar imagen"
+                className="absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition hover:bg-black/60 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 onClick={(e) => e.stopPropagation()}
               >
                 <DownloadIcon />
@@ -112,7 +113,8 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                     href={`/api/media/${attachment.whatsappMediaId}`}
                     download={attachment.filename}
                     title="Descargar archivo"
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition hover:bg-black/10"
+                    aria-label="Descargar archivo"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-black/10 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a884]"
                     style={{ color: colors.textSecondary }}
                     onClick={(e) => e.stopPropagation()}
                   >

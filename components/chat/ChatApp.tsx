@@ -6,6 +6,7 @@ import { subscribeToRealtimeUpdates } from "@/lib/realtime";
 import { ChatSidebar, type WindowFilter } from "./ChatSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { ThemeProvider, useTheme } from "./ThemeContext";
+import { useIsMobile } from "./useIsMobile";
 
 const CHATS_POLL_MS = 5000;
 const MESSAGES_POLL_MS = 3000;
@@ -20,6 +21,7 @@ export function ChatApp() {
 
 function ChatAppInner() {
   const { colors } = useTheme();
+  const isMobile = useIsMobile();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chatsLoading, setChatsLoading] = useState(true);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
@@ -30,6 +32,9 @@ function ChatAppInner() {
   const [search, setSearch] = useState("");
   const [windowFilter, setWindowFilter] = useState<WindowFilter>("all");
   const [collapsed, setCollapsed] = useState(false);
+  // Solo aplica en mobile: qué panel se ve en la navegación de una sola
+  // columna (ver layout más abajo). En desktop se ignora.
+  const [mobilePane, setMobilePane] = useState<"list" | "chat">("list");
   const selectedRef = useRef<string | null>(null);
 
   selectedRef.current = selectedSessionId;
@@ -172,31 +177,68 @@ function ChatAppInner() {
 
   const selectedChat = chats.find((chat) => chat.sessionId === selectedSessionId);
 
+  function handleSelectChat(sessionId: string) {
+    setSelectedSessionId(sessionId);
+    setMobilePane("chat");
+  }
+
+  const sidebar = (
+    <ChatSidebar
+      variant={isMobile ? "mobile" : "desktop"}
+      chats={chats}
+      loading={chatsLoading}
+      selectedSessionId={selectedSessionId}
+      onSelect={handleSelectChat}
+      search={search}
+      onSearchChange={setSearch}
+      windowFilter={windowFilter}
+      onWindowFilterChange={setWindowFilter}
+      collapsed={collapsed}
+      onToggleCollapsed={() => setCollapsed((value) => !value)}
+    />
+  );
+
+  const chatWindow = (
+    <ChatWindow
+      sessionId={selectedSessionId}
+      contactName={selectedChat?.contactName ?? null}
+      messages={messages}
+      loading={loadingMessages}
+      windowOpen={selectedChat?.windowOpen ?? false}
+      windowExpiresAt={selectedChat?.windowExpiresAt ?? null}
+      onSend={handleSend}
+      onSendFile={handleSendFile}
+      onSendAudio={handleSendAudio}
+      onBack={isMobile ? () => setMobilePane("list") : undefined}
+    />
+  );
+
+  if (isMobile) {
+    // Navegación de una sola columna: lista y conversación viven una al lado
+    // de la otra en una pista de 200% de ancho, y se desliza entre ambas
+    // (como la navegación nativa de iOS/Android) en vez de mostrar dos
+    // columnas apretadas.
+    return (
+      <div className="h-full w-full overflow-clip" style={{ background: colors.bgChat }}>
+        <div
+          className="flex h-full w-[200%] transition-transform duration-300 ease-out"
+          style={{ transform: mobilePane === "chat" ? "translateX(-50%)" : "translateX(0%)" }}
+        >
+          <div className="h-full w-1/2 shrink-0" aria-hidden={mobilePane !== "list"} inert={mobilePane !== "list"}>
+            {sidebar}
+          </div>
+          <div className="h-full w-1/2 shrink-0" aria-hidden={mobilePane !== "chat"} inert={mobilePane !== "chat"}>
+            {chatWindow}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full w-full" style={{ background: colors.bgChat }}>
-      <ChatSidebar
-        chats={chats}
-        loading={chatsLoading}
-        selectedSessionId={selectedSessionId}
-        onSelect={setSelectedSessionId}
-        search={search}
-        onSearchChange={setSearch}
-        windowFilter={windowFilter}
-        onWindowFilterChange={setWindowFilter}
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((value) => !value)}
-      />
-      <ChatWindow
-        sessionId={selectedSessionId}
-        contactName={selectedChat?.contactName ?? null}
-        messages={messages}
-        loading={loadingMessages}
-        windowOpen={selectedChat?.windowOpen ?? false}
-        windowExpiresAt={selectedChat?.windowExpiresAt ?? null}
-        onSend={handleSend}
-        onSendFile={handleSendFile}
-        onSendAudio={handleSendAudio}
-      />
+      {sidebar}
+      {chatWindow}
     </div>
   );
 }
