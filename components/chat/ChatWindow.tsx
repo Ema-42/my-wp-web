@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import type { ChatMessage } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import type { AttentionState, ChatMessage } from "@/lib/types";
 import { MessageBubble } from "./MessageBubble";
 import { formatRemaining } from "./format";
 import { UserAvatar } from "./UserAvatar";
@@ -21,6 +21,8 @@ type Props = {
   loading: boolean;
   windowOpen: boolean;
   windowExpiresAt: string | null;
+  attentionState: AttentionState;
+  onSetAttentionState: (sessionId: string, estado: AttentionState) => Promise<void>;
   onSend: (text: string) => Promise<void>;
   onSendFile: (file: File, caption?: string) => Promise<void>;
   onSendAudio: (file: File) => Promise<void>;
@@ -44,6 +46,8 @@ export function ChatWindow({
   loading,
   windowOpen,
   windowExpiresAt,
+  attentionState,
+  onSetAttentionState,
   onSend,
   onSendFile,
   onSendAudio,
@@ -53,6 +57,7 @@ export function ChatWindow({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendingFiles, setSendingFiles] = useState(false);
+  const [changingAttention, setChangingAttention] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, forceTick] = useState(0);
   const [dragActive, setDragActive] = useState(false);
@@ -60,11 +65,16 @@ export function ChatWindow({
   const [sendingAudio, setSendingAudio] = useState(false);
   const voiceRecorder = useVoiceRecorder();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeMatchId, setActiveMatchId] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   // "Pegado" al final = el usuario no scrolleó hacia arriba a leer mensajes
   // viejos. Solo en ese caso seguimos el scroll automático con cada mensaje
@@ -148,6 +158,9 @@ export function ChatWindow({
   useEffect(() => {
     pinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveMatchId(null);
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [sessionId]);
 
@@ -164,6 +177,73 @@ export function ChatWindow({
     const interval = setInterval(() => forceTick((n) => n + 1), 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // IDs de mensajes que matchean la búsqueda, en el mismo orden (más viejo
+  // a más nuevo) que `messages`.
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return messages.filter((m) => m.text?.toLowerCase().includes(q)).map((m) => m.id);
+  }, [messages, searchQuery]);
+
+  const activeMatchPosition = activeMatchId != null ? searchMatches.indexOf(activeMatchId) : -1;
+
+  // Si cambia la búsqueda (o llegan mensajes nuevos), arrancamos mostrando
+  // la coincidencia más reciente — igual que "buscar" de WhatsApp Web.
+  useEffect(() => {
+    setActiveMatchId((prev) => {
+      if (searchMatches.length === 0) return null;
+      if (prev !== null && searchMatches.includes(prev)) return prev;
+      return searchMatches[searchMatches.length - 1];
+    });
+  }, [searchMatches]);
+
+  // Centra en pantalla el mensaje resaltado cada vez que cambia.
+  useEffect(() => {
+    if (activeMatchId == null) return;
+    messageRefs.current.get(activeMatchId)?.scrollIntoView({
+      block: "center",
+      behavior: "smooth",
+    });
+  }, [activeMatchId]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  function goToMatch(direction: 1 | -1) {
+    if (searchMatches.length === 0) return;
+    const current = activeMatchId != null ? searchMatches.indexOf(activeMatchId) : -1;
+    let next = current + direction;
+    if (next < 0) next = searchMatches.length - 1;
+    if (next >= searchMatches.length) next = 0;
+    setActiveMatchId(searchMatches[next]);
+  }
+
+  function openSearch() {
+    setSearchOpen(true);
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveMatchId(null);
+  }
+
+  async function handleSetAttentionState(estado: AttentionState) {
+    if (!sessionId || changingAttention) return;
+    setChangingAttention(true);
+    setError(null);
+    try {
+      await onSetAttentionState(sessionId, estado);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No se pudo cambiar el estado del chat"
+      );
+    } finally {
+      setChangingAttention(false);
+    }
+  }
 
   if (!sessionId) {
     return (
@@ -330,9 +410,161 @@ export function ChatWindow({
                   ? "Cargando..."
                   : `${messages.length} mensajes`}
             </span>
+            {attentionState === "bot" && (
+              <button
+                type="button"
+                onClick={() => handleSetAttentionState("atendido")}
+                disabled={changingAttention}
+                title="Tomar control manualmente: el bot deja de responder"
+                className={`hidden shrink-0 text-xs underline-offset-2 hover:underline disabled:opacity-50 sm:inline ${FOCUS_RING}`}
+                style={{ color: colors.textSecondary }}
+              >
+                Tomar control
+              </button>
+            )}
           </div>
         </div>
+        {attentionState === "bot" && (
+          <button
+            type="button"
+            onClick={() => handleSetAttentionState("atendido")}
+            disabled={changingAttention}
+            title="Tomar control manualmente: el bot deja de responder"
+            aria-label="Tomar control manualmente"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-50 sm:hidden ${FOCUS_RING}`}
+            style={{ color: colors.textSecondary }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+            </svg>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => (searchOpen ? closeSearch() : openSearch())}
+          title={searchOpen ? "Cerrar búsqueda" : "Buscar en el chat"}
+          aria-label={searchOpen ? "Cerrar búsqueda" : "Buscar en el chat"}
+          aria-pressed={searchOpen}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
+          style={{ color: searchOpen ? "#00a884" : colors.textSecondary }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+            <path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z" />
+          </svg>
+        </button>
       </header>
+
+      {attentionState === "solicitada" && (
+        <div
+          className="flex flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4"
+          style={{ background: "#3d1f1f", borderColor: colors.border }}
+        >
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+          </span>
+          <span className="flex-1 text-sm font-medium text-red-100">
+            🔔 Este contacto solicita atención de una persona
+          </span>
+          <button
+            type="button"
+            onClick={() => handleSetAttentionState("atendido")}
+            disabled={changingAttention}
+            className={`shrink-0 rounded-full bg-red-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-red-600 active:scale-95 disabled:opacity-50 ${FOCUS_RING}`}
+          >
+            {changingAttention ? "..." : "Tomar control"}
+          </button>
+        </div>
+      )}
+
+      {attentionState === "atendido" && (
+        <div
+          className="flex flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4"
+          style={{ background: "#1e2a3d", borderColor: colors.border }}
+        >
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-400" />
+          <span className="flex-1 text-sm font-medium text-blue-100">
+            🧑 Estás atendiendo este chat — el bot no va a responder
+          </span>
+          <button
+            type="button"
+            onClick={() => handleSetAttentionState("bot")}
+            disabled={changingAttention}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-blue-100 ring-1 ring-blue-400 transition hover:bg-blue-400/10 active:scale-95 disabled:opacity-50 ${FOCUS_RING}`}
+          >
+            {changingAttention ? "..." : "Devolver al bot"}
+          </button>
+        </div>
+      )}
+
+      {searchOpen && (
+        <div
+          className="flex items-center gap-1.5 border-b px-3 py-2 transition-colors sm:px-4"
+          style={{ background: colors.bgSecondary, borderColor: colors.border }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 shrink-0" style={{ color: colors.textSecondary }}>
+            <path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z" />
+          </svg>
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") closeSearch();
+              else if (e.key === "Enter") {
+                e.preventDefault();
+                goToMatch(e.shiftKey ? -1 : 1);
+              }
+            }}
+            placeholder="Buscar en este chat"
+            className={`flex-1 bg-transparent text-[16px] outline-none sm:text-sm ${FOCUS_RING}`}
+            style={{ color: colors.textPrimary }}
+          />
+          <span className="shrink-0 text-xs tabular-nums" style={{ color: colors.textSecondary }}>
+            {searchQuery.trim()
+              ? `${searchMatches.length > 0 ? activeMatchPosition + 1 : 0}/${searchMatches.length}`
+              : ""}
+          </span>
+          <button
+            type="button"
+            onClick={() => goToMatch(-1)}
+            disabled={searchMatches.length === 0}
+            title="Resultado anterior"
+            aria-label="Resultado anterior"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-30 ${FOCUS_RING}`}
+            style={{ color: colors.textSecondary }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+              <path d="M7.41 15.41 12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => goToMatch(1)}
+            disabled={searchMatches.length === 0}
+            title="Resultado siguiente"
+            aria-label="Resultado siguiente"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-30 ${FOCUS_RING}`}
+            style={{ color: colors.textSecondary }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+              <path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={closeSearch}
+            title="Cerrar búsqueda"
+            aria-label="Cerrar búsqueda"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 ${FOCUS_RING}`}
+            style={{ color: colors.textSecondary }}
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+              <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <div
         ref={scrollContainerRef}
@@ -344,7 +576,19 @@ export function ChatWindow({
             <MessageListSkeleton />
           ) : (
             messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <div
+                key={message.id}
+                ref={(el) => {
+                  if (el) messageRefs.current.set(message.id, el);
+                  else messageRefs.current.delete(message.id);
+                }}
+              >
+                <MessageBubble
+                  message={message}
+                  highlightQuery={searchQuery.trim() || undefined}
+                  isActiveMatch={message.id === activeMatchId}
+                />
+              </div>
             ))
           )}
           <div ref={bottomRef} />

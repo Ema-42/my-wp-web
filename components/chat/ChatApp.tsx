@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage, ChatSummary } from "@/lib/types";
+import type { AttentionState, ChatMessage, ChatSummary } from "@/lib/types";
 import { subscribeToRealtimeUpdates } from "@/lib/realtime";
 import { ChatSidebar, type WindowFilter } from "./ChatSidebar";
 import { ChatWindow } from "./ChatWindow";
@@ -175,6 +175,30 @@ function ChatAppInner() {
     [selectedSessionId, loadMessages, loadChats]
   );
 
+  const handleSetAttentionState = useCallback(
+    async (sessionId: string, estado: AttentionState) => {
+      // Optimista: refleja el cambio ya mismo, no esperamos al próximo poll.
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.sessionId === sessionId ? { ...chat, attentionState: estado } : chat
+        )
+      );
+
+      const res = await fetch(`/api/chats/${encodeURIComponent(sessionId)}/estado`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        await loadChats(); // revierte el optimista si falló
+        throw new Error(data?.error ?? "No se pudo cambiar el estado del chat");
+      }
+    },
+    [loadChats]
+  );
+
   const selectedChat = chats.find((chat) => chat.sessionId === selectedSessionId);
 
   function handleSelectChat(sessionId: string) {
@@ -206,6 +230,8 @@ function ChatAppInner() {
       loading={loadingMessages}
       windowOpen={selectedChat?.windowOpen ?? false}
       windowExpiresAt={selectedChat?.windowExpiresAt ?? null}
+      attentionState={selectedChat?.attentionState ?? "bot"}
+      onSetAttentionState={handleSetAttentionState}
       onSend={handleSend}
       onSendFile={handleSendFile}
       onSendAudio={handleSendAudio}

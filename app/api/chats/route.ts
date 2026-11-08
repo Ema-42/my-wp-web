@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { pool, CHAT_HISTORY_TABLE, CONTACTS_TABLE } from "@/lib/db";
 import { parseChatMessage } from "@/lib/chat-message";
 import { getServiceWindow } from "@/lib/window";
+import type { AttentionState } from "@/lib/types";
+
+const VALID_ATTENTION_STATES: AttentionState[] = ["bot", "solicitada", "atendido"];
 
 export async function GET() {
   const { rows } = await pool.query(`
@@ -28,7 +31,8 @@ export async function GET() {
       l.message AS last_message,
       lc.last_contact_at,
       ct.nombre AS contact_name,
-      ct.ultimo_leido_at
+      ct.ultimo_leido_at,
+      ct.estado_atencion
     FROM counts c
     JOIN last_msg l ON l.session_id = c.session_id
     LEFT JOIN last_contact_msg lc ON lc.session_id = c.session_id
@@ -52,6 +56,10 @@ export async function GET() {
         new Date(row.ultimo_leido_at).getTime() <
           new Date(lastContactAt).getTime());
 
+    const attentionState = VALID_ATTENTION_STATES.includes(row.estado_atencion)
+      ? (row.estado_atencion as AttentionState)
+      : "bot";
+
     return {
       sessionId: row.session_id as string,
       contactName: (row.contact_name as string | null) ?? null,
@@ -63,6 +71,7 @@ export async function GET() {
       windowOpen: serviceWindow.open,
       windowExpiresAt: serviceWindow.expiresAt,
       unread,
+      attentionState,
     };
   });
 

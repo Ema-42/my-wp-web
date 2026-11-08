@@ -150,6 +150,21 @@ export function ChatSidebar({
                   >
                     <UserAvatar seed={chat.sessionId} size={36} />
                   </div>
+                  {chat.attentionState === "solicitada" && (
+                    <span className="absolute -bottom-0.5 -left-0.5 flex h-3.5 w-3.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                      <span
+                        className="relative inline-flex h-3.5 w-3.5 rounded-full border-2 bg-red-500"
+                        style={{ borderColor: colors.bgPrimary }}
+                      />
+                    </span>
+                  )}
+                  {chat.attentionState === "atendido" && (
+                    <span
+                      className="absolute -bottom-0.5 -left-0.5 h-3.5 w-3.5 rounded-full border-2 bg-blue-500"
+                      style={{ borderColor: colors.bgPrimary }}
+                    />
+                  )}
                   {chat.unread && (
                     <span
                       className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2"
@@ -178,6 +193,12 @@ export function ChatSidebar({
                 ? "Ventana de atención abierta"
                 : "Ventana de atención vencida"}
             </p>
+            {hovered.chat.attentionState === "solicitada" && (
+              <p style={{ color: "#ff8a80" }}>🔔 Solicita atención humana</p>
+            )}
+            {hovered.chat.attentionState === "atendido" && (
+              <p style={{ color: "#82b1ff" }}>🧑 En atención (bot pausado)</p>
+            )}
             <p style={{ color: colors.textSecondary }}>
               Último mensaje: {formatListTimestamp(hovered.chat.lastAt)}
             </p>
@@ -356,20 +377,41 @@ export function ChatSidebar({
                       } as CSSProperties)
                 }
               >
-                <div
-                  className="shrink-0 rounded-full border-2 p-[3px] transition-colors"
-                  style={{
-                    borderColor: chat.windowOpen
-                      ? WINDOW_OPEN_RING
-                      : WINDOW_CLOSED_RING,
-                  }}
-                  title={
-                    chat.windowOpen
-                      ? "Ventana de atención abierta"
-                      : "Ventana de atención vencida"
-                  }
-                >
-                  <UserAvatar seed={chat.sessionId} size={48} />
+                <div className="relative shrink-0">
+                  <div
+                    className="rounded-full border-2 p-[3px] transition-colors"
+                    style={{
+                      borderColor: chat.windowOpen
+                        ? WINDOW_OPEN_RING
+                        : WINDOW_CLOSED_RING,
+                    }}
+                    title={
+                      chat.windowOpen
+                        ? "Ventana de atención abierta"
+                        : "Ventana de atención vencida"
+                    }
+                  >
+                    <UserAvatar seed={chat.sessionId} size={48} />
+                  </div>
+                  {chat.attentionState === "solicitada" && (
+                    <span
+                      className="absolute -bottom-0.5 -left-0.5 flex h-4 w-4"
+                      title="Solicita atención humana"
+                    >
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                      <span
+                        className="relative inline-flex h-4 w-4 rounded-full border-2 bg-red-500"
+                        style={{ borderColor: colors.bgPrimary }}
+                      />
+                    </span>
+                  )}
+                  {chat.attentionState === "atendido" && (
+                    <span
+                      className="absolute -bottom-0.5 -left-0.5 h-4 w-4 rounded-full border-2 bg-blue-500"
+                      style={{ borderColor: colors.bgPrimary }}
+                      title="En atención (bot pausado)"
+                    />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">

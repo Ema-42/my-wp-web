@@ -30,26 +30,43 @@ Tabla que n8n llena automáticamente con la memoria de LangChain. Es la que lee 
 | `message`    | `JSONB NOT NULL`              | Mensaje en formato LangChain `{type, content, …}`  |
 | `created_at` | `TIMESTAMPTZ DEFAULT NOW()`   | Fecha/hora del mensaje                             |
 
-### `contactos` — metadata y resumen de contactos
-Resumen agregado por contacto (lo usa el bot n8n para contexto, no la UI de chats).
+### `contactos` — nombre, lectura y estado de atención por contacto
+Solo estas columnas las usa esta app (vía `LEFT JOIN numero = session_id`
+en `GET /api/chats`); nada más de esta tabla le importa al código.
 
 | Columna            | Tipo                          | Descripción                              |
 |-------------------|-------------------------------|-------------------------------------------|
 | `id`               | `SERIAL PRIMARY KEY`          | ID interno                                |
-| `numero`           | `TEXT UNIQUE`                 | Número de teléfono del contacto           |
+| `numero`           | `TEXT UNIQUE`                 | Número de teléfono del contacto. El `UNIQUE` es obligatorio — lo necesita el `ON CONFLICT (numero)` de los upserts |
 | `nombre`           | `TEXT`                        | Nombre de perfil de WhatsApp del contacto (`contacts[0].profile.name` del webhook). Si es `NULL`, la UI muestra el número |
-| `primer_mensaje`   | `TIMESTAMPTZ`                 | Fecha del primer mensaje del contacto     |
-| `ultimo_mensaje`   | `TIMESTAMPTZ`                 | Fecha del último mensaje del contacto     |
-| `total_mensajes`   | `INTEGER`                     | Conteo total de mensajes de la sesión     |
+| `estado_atencion`  | `TEXT DEFAULT 'bot'`          | `bot` (normal) \| `solicitada` (el contacto pidió una persona, el bot sigue respondiendo) \| `atendido` (un operador tomó el control, el bot no debe responder). Lo cambia esta app vía `POST /api/chats/[sessionId]/estado`, y lo tiene que **leer tu flujo de n8n** antes de responder — esta app no se lo impide al bot, solo guarda la intención |
 | `created_at`       | `TIMESTAMPTZ DEFAULT NOW()`   | Fecha de creación del registro            |
 | `ultimo_leido_at`  | `TIMESTAMPTZ`                 | Última vez que un operador abrió este chat en la UI. **No** es el tick de lectura de WhatsApp (eso es entre el bot y el contacto) — es el badge de "no leído" de esta app, y se comparte entre todos los que la usan (no es por navegador) |
 
-`numero UNIQUE`, `nombre` y `ultimo_leido_at` no vienen por defecto — hay que
-agregarlas una sola vez con esta migración:
+Script de creación (tabla nueva):
+
+```sql
+CREATE TABLE IF NOT EXISTS contactos (
+  id SERIAL PRIMARY KEY,
+  numero TEXT UNIQUE,
+  nombre TEXT,
+  estado_atencion TEXT DEFAULT 'bot' CHECK (estado_atencion IN ('bot', 'solicitada', 'atendido')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  ultimo_leido_at TIMESTAMPTZ
+);
+```
+
+Si tu tabla ya existe con columnas extra de seguimiento propias de tu bot
+de n8n (`primer_mensaje`, `ultimo_mensaje`, `total_mensajes`, etc.), déjalas
+nomás — no estorban, esta app simplemente no las lee. Si ya la tenés creada
+y le faltan las columnas de arriba, agrégalas sueltas:
 
 ```sql
 ALTER TABLE contactos ADD COLUMN IF NOT EXISTS nombre TEXT;
 ALTER TABLE contactos ADD COLUMN IF NOT EXISTS ultimo_leido_at TIMESTAMPTZ;
+ALTER TABLE contactos ADD COLUMN IF NOT EXISTS estado_atencion TEXT DEFAULT 'bot';
+ALTER TABLE contactos ADD CONSTRAINT contactos_estado_atencion_check
+  CHECK (estado_atencion IN ('bot', 'solicitada', 'atendido'));
 
 DO $$
 BEGIN
@@ -69,6 +86,15 @@ VALUES ($1, $2)
 ON CONFLICT (numero)
 DO UPDATE SET nombre = COALESCE(EXCLUDED.nombre, contactos.nombre);
 ```
+
+#### Tomar/devolver control del chat
+
+En el header del chat aparece un botón de "Tomar control" (o, si el
+contacto ya pidió atención, una barra roja parpadeante) y, una vez tomado,
+"Devolver al bot". Ambos llaman a `POST /api/chats/[sessionId]/estado` con
+`{ "estado": "bot" | "solicitada" | "atendido" }`. El flujo de n8n es el que
+tiene que **leer** esta columna antes de responder — esta app solo la
+escribe/muestra, no bloquea al bot por sí sola.
 
 ### `documents_openai` — base vectorial (RAG del bot)
 Embeddings que usa el bot n8n para responder con contexto (búsqueda semántica), no para esta UI.
@@ -150,6 +176,7 @@ app/
   api/
     chats/          GET  — lista de conversaciones (nombre, no leídos, ventana)
     chats/[sessionId]/read/  POST — marca un chat como leído por el operador
+    chats/[sessionId]/estado/ POST — cambia estado_atencion (bot/solicitada/atendido)
     messages/       GET  — mensajes de una sesión | POST  — enviar texto
     documents/      POST — enviar imagen o documento
     audio/          POST — enviar nota de voz (ver abajo)

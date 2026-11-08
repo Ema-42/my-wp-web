@@ -1,6 +1,33 @@
+import type { ReactNode } from "react";
 import type { ChatMessage } from "@/lib/types";
 import { formatTime } from "./format";
 import { useTheme } from "./ThemeContext";
+
+/** Envuelve las coincidencias de `query` dentro de `text` en `<mark>`. */
+function highlightMatches(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const lower = text.toLowerCase();
+  const q = query.toLowerCase();
+  const firstIdx = lower.indexOf(q);
+  if (firstIdx === -1) return text;
+
+  const parts: ReactNode[] = [];
+  let start = 0;
+  let idx = firstIdx;
+  let key = 0;
+  while (idx !== -1) {
+    if (idx > start) parts.push(text.slice(start, idx));
+    parts.push(
+      <mark key={key++} className="rounded-sm bg-yellow-300 px-0.5 text-black">
+        {text.slice(idx, idx + q.length)}
+      </mark>
+    );
+    start = idx + q.length;
+    idx = lower.indexOf(q, start);
+  }
+  if (start < text.length) parts.push(text.slice(start));
+  return parts;
+}
 
 function DocumentIcon() {
   return (
@@ -26,7 +53,15 @@ function DownloadIcon() {
   );
 }
 
-export function MessageBubble({ message }: { message: ChatMessage }) {
+type Props = {
+  message: ChatMessage;
+  /** Texto buscado en la barra de búsqueda del chat; resalta coincidencias. */
+  highlightQuery?: string;
+  /** Es el resultado actualmente seleccionado al navegar la búsqueda. */
+  isActiveMatch?: boolean;
+};
+
+export function MessageBubble({ message, highlightQuery, isActiveMatch }: Props) {
   const { colors } = useTheme();
   const isOutgoing = message.role === "bot";
   const attachment = message.attachment;
@@ -38,15 +73,16 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         : `📎 ${attachment.filename}`
     : null;
   const hasOwnCaption = attachment && message.text && message.text !== autoCaption;
+  const text = highlightQuery ? highlightMatches(message.text, highlightQuery) : message.text;
 
   return (
     <div className={`message-enter flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
       <div
-        className={`overflow-hidden rounded-lg shadow-sm ${
+        className={`overflow-hidden rounded-lg shadow-sm transition-shadow ${
           attachment?.mediaType === "image" && attachment.whatsappMediaId
             ? "max-w-[75%]"
             : "max-w-[65%] px-3 py-2"
-        }`}
+        } ${isActiveMatch ? "ring-2 ring-[#00a884] ring-offset-1" : ""}`}
         style={{
           background: isOutgoing ? colors.bubbleOut : colors.bubbleIn,
           color: colors.textPrimary,
@@ -90,7 +126,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             </div>
             {hasOwnCaption && (
               <p className="whitespace-pre-wrap break-words px-3 pb-1 pt-1.5 text-sm">
-                {message.text}
+                {text}
               </p>
             )}
             <span
@@ -126,7 +162,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
             {(!attachment || hasOwnCaption) && (
               <p className="whitespace-pre-wrap break-words text-sm">
-                {message.text}
+                {text}
               </p>
             )}
 
