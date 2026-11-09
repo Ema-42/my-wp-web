@@ -25,7 +25,7 @@ export type ChatSummary = {
 export type ChatAttachment = {
   filename: string;
   mimeType?: string;
-  mediaType?: "image" | "document" | "audio";
+  mediaType?: "image" | "document" | "audio" | "sticker";
   whatsappMediaId?: string;
 };
 
@@ -35,4 +35,12 @@ export type ChatMessage = {
   text: string;
   createdAt: string;
   attachment?: ChatAttachment;
+};
+
+/** Sticker guardado manualmente por el operador (ver POST /api/stickers). */
+export type SavedSticker = {
+  id: number;
+  mimeType: string;
+  animated: boolean;
+  createdAt: string;
 };

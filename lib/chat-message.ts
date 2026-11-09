@@ -3,7 +3,7 @@ export type ChatRole = "contact" | "bot" | "unknown";
 export type ChatAttachment = {
   filename: string;
   mimeType?: string;
-  mediaType?: "image" | "document" | "audio";
+  mediaType?: "image" | "document" | "audio" | "sticker";
   whatsappMediaId?: string;
 };
 
@@ -71,7 +71,9 @@ export function parseChatMessage(raw: unknown): ParsedMessage {
                 ? ("audio" as const)
                 : (rawAttachment as Record<string, unknown>).mediaType === "document"
                   ? ("document" as const)
-                  : undefined,
+                  : (rawAttachment as Record<string, unknown>).mediaType === "sticker"
+                    ? ("sticker" as const)
+                    : undefined,
           whatsappMediaId:
             typeof (rawAttachment as Record<string, unknown>).whatsappMediaId === "string"
               ? ((rawAttachment as Record<string, unknown>).whatsappMediaId as string)

@@ -50,3 +50,8 @@ export const DOCUMENTS_TABLE = sqlIdentifier(
   process.env.DB_DOCUMENTS_TABLE,
   "DB_DOCUMENTS_TABLE"
 );
+
+export const STICKERS_TABLE = sqlIdentifier(
+  process.env.DB_STICKERS_TABLE,
+  "DB_STICKERS_TABLE"
+);

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import type { AttentionState, ChatMessage } from "@/lib/types";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from "react";
+import type { AttentionState, ChatMessage, SavedSticker } from "@/lib/types";
 import { MessageBubble } from "./MessageBubble";
+import { LoopingSticker } from "./LoopingSticker";
 import { formatRemaining } from "./format";
 import { UserAvatar } from "./UserAvatar";
 import { useTheme } from "./ThemeContext";
@@ -13,12 +14,21 @@ import {
   WINDOW_OPEN_ACCENT,
   WINDOW_OPEN_BG,
 } from "./window-colors";
+import {
+  CHAT_PATTERN_LINE_DARK,
+  CHAT_PATTERN_LINE_LIGHT,
+  CHAT_PATTERN_SIZE_CSS,
+  getChatPatternDataUri,
+} from "./chat-background";
 
 type Props = {
   sessionId: string | null;
   contactName: string | null;
   messages: ChatMessage[];
   loading: boolean;
+  hasMoreMessages: boolean;
+  loadingOlderMessages: boolean;
+  onLoadMoreMessages: () => Promise<void>;
   windowOpen: boolean;
   windowExpiresAt: string | null;
   attentionState: AttentionState;
@@ -26,12 +36,45 @@ type Props = {
   onSend: (text: string) => Promise<void>;
   onSendFile: (file: File, caption?: string) => Promise<void>;
   onSendAudio: (file: File) => Promise<void>;
+  savedStickers: SavedSticker[];
+  onSaveSticker: (whatsappMediaId: string) => Promise<void>;
+  onSendSticker: (stickerId: number) => Promise<void>;
   /** Present only on mobile: returns to the chat list pane. */
   onBack?: () => void;
 };
 
 const FOCUS_RING =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a884]";
+
+// Set curado de los emojis más usados en chats de atención al cliente:
+// caritas/reacciones comunes primero, gestos y corazones después.
+const EMOJI_OPTIONS = [
+  "😀", "😁", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😍",
+  "🥰", "😘", "😋", "😛", "😜", "🤪", "😎", "🥳", "😏", "😢",
+  "😭", "😤", "😡", "🤯", "😳", "🥵", "🥶", "😱", "😨", "🥺",
+  "😴", "🤔", "🤭", "🤫", "🙄", "😬", "🤐", "🤢", "🤮", "🤧",
+  "😷", "🤒", "🤕", "😈", "👻", "💀", "🤖", "👍", "👎", "👌",
+  "✌️", "🤞", "🤟", "🤘", "👏", "🙌", "🤝", "🙏", "💪", "👋",
+  "✍️", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💔",
+  "❣️", "💕", "💖", "💯", "🔥", "✅", "❌", "🎉", "⭐", "🎁",
+];
+
+function EmojiIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+      <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
+    </svg>
+  );
+}
+
+// Cuadrado redondeado con la esquina doblada — ícono genérico de "sticker".
+function StickerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+      <path d="M5 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l7-7V5a2 2 0 0 0-2-2H5zm9 16.5V15a1 1 0 0 1 1-1h4.5z" />
+    </svg>
+  );
+}
 
 function formatClock(totalSeconds: number) {
   const m = Math.floor(totalSeconds / 60);
@@ -44,6 +87,9 @@ export function ChatWindow({
   contactName,
   messages,
   loading,
+  hasMoreMessages,
+  loadingOlderMessages,
+  onLoadMoreMessages,
   windowOpen,
   windowExpiresAt,
   attentionState,
@@ -51,9 +97,16 @@ export function ChatWindow({
   onSend,
   onSendFile,
   onSendAudio,
+  savedStickers,
+  onSaveSticker,
+  onSendSticker,
   onBack,
 }: Props) {
-  const { colors } = useTheme();
+  const { colors, dark } = useTheme();
+  const chatPatternImage = useMemo(
+    () => getChatPatternDataUri(dark ? CHAT_PATTERN_LINE_DARK : CHAT_PATTERN_LINE_LIGHT),
+    [dark]
+  );
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendingFiles, setSendingFiles] = useState(false);
@@ -68,13 +121,40 @@ export function ChatWindow({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMatchId, setActiveMatchId] = useState<number | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [stickerTrayOpen, setStickerTrayOpen] = useState(false);
+  const [sendingStickerId, setSendingStickerId] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const draftInputRef = useRef<HTMLInputElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const stickerTrayRef = useRef<HTMLDivElement | null>(null);
   const objectUrlsRef = useRef<Map<string, string>>(new Map());
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const scrollRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+
+  // "Cargar mensajes anteriores" los antepone a la lista (arriba). Sin esto
+  // el navegador mantiene el scrollTop en píxeles y el contenido que estabas
+  // mirando "salta" hacia abajo — restauramos la posición relativa después
+  // de que el DOM ya creció (useLayoutEffect de abajo, antes del paint).
+  async function handleLoadMore() {
+    const el = scrollContainerRef.current;
+    if (!el || loadingOlderMessages) return;
+    scrollRestoreRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+    await onLoadMoreMessages();
+  }
+
+  useLayoutEffect(() => {
+    const pending = scrollRestoreRef.current;
+    const el = scrollContainerRef.current;
+    if (pending && el) {
+      el.scrollTop = pending.scrollTop + (el.scrollHeight - pending.scrollHeight);
+      scrollRestoreRef.current = null;
+    }
+  }, [messages]);
 
   // "Pegado" al final = el usuario no scrolleó hacia arriba a leer mensajes
   // viejos. Solo en ese caso seguimos el scroll automático con cada mensaje
@@ -161,6 +241,8 @@ export function ChatWindow({
     setSearchOpen(false);
     setSearchQuery("");
     setActiveMatchId(null);
+    setEmojiPickerOpen(false);
+    setStickerTrayOpen(false);
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [sessionId]);
 
@@ -210,6 +292,71 @@ export function ChatWindow({
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
+
+  // Cerrar el panel de emojis al hacer click afuera.
+  useEffect(() => {
+    if (!emojiPickerOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(event.target as Node)
+      ) {
+        setEmojiPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [emojiPickerOpen]);
+
+  // Cerrar la bandeja de stickers al hacer click afuera.
+  useEffect(() => {
+    if (!stickerTrayOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        stickerTrayRef.current &&
+        !stickerTrayRef.current.contains(event.target as Node)
+      ) {
+        setStickerTrayOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [stickerTrayOpen]);
+
+  // Los stickers se mandan al toque, sin paso de "escribir" — igual que
+  // WhatsApp real.
+  async function handleSendSticker(stickerId: number) {
+    if (sendingStickerId !== null) return;
+    setSendingStickerId(stickerId);
+    setError(null);
+    try {
+      pinnedToBottomRef.current = true;
+      await onSendSticker(stickerId);
+      setStickerTrayOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo enviar el sticker");
+    } finally {
+      setSendingStickerId(null);
+    }
+  }
+
+  // Inserta en la posición del cursor (no solo al final) para poder usarlo
+  // también en medio de una frase que ya se estaba escribiendo.
+  function insertEmoji(emoji: string) {
+    const el = draftInputRef.current;
+    if (!el) {
+      setDraft((d) => d + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? draft.length;
+    const end = el.selectionEnd ?? draft.length;
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + emoji.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
 
   function goToMatch(direction: 1 | -1) {
     if (searchMatches.length === 0) return;
@@ -334,7 +481,12 @@ export function ChatWindow({
   return (
     <div
       className="relative flex h-full min-w-0 flex-1 flex-col transition-colors"
-      style={{ background: colors.bgChat }}
+      style={{
+        backgroundColor: colors.bgChat,
+        backgroundImage: chatPatternImage,
+        backgroundRepeat: "repeat",
+        backgroundSize: CHAT_PATTERN_SIZE_CSS,
+      }}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={(e) => e.preventDefault()}
@@ -416,9 +568,12 @@ export function ChatWindow({
                 onClick={() => handleSetAttentionState("atendido")}
                 disabled={changingAttention}
                 title="Tomar control manualmente: el bot deja de responder"
-                className={`hidden shrink-0 text-xs underline-offset-2 hover:underline disabled:opacity-50 sm:inline ${FOCUS_RING}`}
-                style={{ color: colors.textSecondary }}
+                className={`hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition hover:bg-[#00a884]/20 active:scale-95 disabled:opacity-50 sm:inline-flex ${FOCUS_RING}`}
+                style={{ color: "#00a884", background: "#00a8841a" }}
               >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                </svg>
                 Tomar control
               </button>
             )}
@@ -431,8 +586,8 @@ export function ChatWindow({
             disabled={changingAttention}
             title="Tomar control manualmente: el bot deja de responder"
             aria-label="Tomar control manualmente"
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-50 sm:hidden ${FOCUS_RING}`}
-            style={{ color: colors.textSecondary }}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-[#00a884]/10 active:scale-95 disabled:opacity-50 sm:hidden ${FOCUS_RING}`}
+            style={{ color: "#00a884" }}
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
               <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
@@ -480,17 +635,18 @@ export function ChatWindow({
       {attentionState === "atendido" && (
         <div
           className="flex flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4"
-          style={{ background: "#1e2a3d", borderColor: colors.border }}
+          style={{ background: "#0e3b2e", borderColor: colors.border }}
         >
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-400" />
-          <span className="flex-1 text-sm font-medium text-blue-100">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#00a884]" />
+          <span className="flex-1 text-sm font-medium" style={{ color: "#8fe3ab" }}>
             🧑 Estás atendiendo este chat — el bot no va a responder
           </span>
           <button
             type="button"
             onClick={() => handleSetAttentionState("bot")}
             disabled={changingAttention}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-blue-100 ring-1 ring-blue-400 transition hover:bg-blue-400/10 active:scale-95 disabled:opacity-50 ${FOCUS_RING}`}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition hover:bg-[#00a884]/10 active:scale-95 disabled:opacity-50 ${FOCUS_RING}`}
+            style={{ color: "#8fe3ab", boxShadow: "inset 0 0 0 1px #00a884" }}
           >
             {changingAttention ? "..." : "Devolver al bot"}
           </button>
@@ -572,6 +728,29 @@ export function ChatWindow({
         className="relative flex-1 overflow-y-auto px-3 py-3 sm:px-6 sm:py-4"
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
+          {!loading && hasMoreMessages && (
+            <div className="flex justify-center pb-1">
+              <button
+                type="button"
+                onClick={handleLoadMore}
+                disabled={loadingOlderMessages}
+                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium transition hover:bg-[#00a884]/15 hover:text-[#00a884] active:scale-95 disabled:opacity-60 disabled:hover:bg-transparent ${FOCUS_RING}`}
+                style={{ background: colors.bgTertiary, color: colors.textSecondary }}
+              >
+                {loadingOlderMessages ? (
+                  <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
+                    <path d="M12 2a10 10 0 0 1 10 10" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+                    <path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8z" />
+                  </svg>
+                )}
+                {loadingOlderMessages ? "Cargando…" : "Cargar mensajes anteriores"}
+              </button>
+            </div>
+          )}
           {loading && messages.length === 0 ? (
             <MessageListSkeleton />
           ) : (
@@ -587,6 +766,7 @@ export function ChatWindow({
                   message={message}
                   highlightQuery={searchQuery.trim() || undefined}
                   isActiveMatch={message.id === activeMatchId}
+                  onSaveSticker={onSaveSticker}
                 />
               </div>
             ))
@@ -793,6 +973,111 @@ export function ChatWindow({
           </>
         ) : (
           <>
+            <div className="relative shrink-0" ref={emojiPickerRef}>
+              <button
+                type="button"
+                onClick={() => setEmojiPickerOpen((v) => !v)}
+                disabled={inputDisabled}
+                title={windowOpen ? "Emojis" : "Ventana vencida: no puedes escribir"}
+                aria-label="Insertar emoji"
+                aria-haspopup="true"
+                aria-expanded={emojiPickerOpen}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
+                style={{ color: emojiPickerOpen ? "#00a884" : colors.textSecondary }}
+              >
+                <EmojiIcon />
+              </button>
+
+              {emojiPickerOpen && (
+                <div
+                  role="menu"
+                  className="absolute bottom-12 left-0 z-30 w-72 overflow-hidden rounded-lg shadow-lg"
+                  style={{ background: colors.bgPrimary, border: `1px solid ${colors.border}` }}
+                >
+                  <div className="grid max-h-60 grid-cols-8 gap-0.5 overflow-y-auto p-2">
+                    {EMOJI_OPTIONS.map((emoji, i) => (
+                      <button
+                        key={`${emoji}-${i}`}
+                        type="button"
+                        onClick={() => insertEmoji(emoji)}
+                        title={emoji}
+                        className={`flex h-8 w-8 items-center justify-center rounded-md text-lg transition hover:bg-[var(--row-hover)] active:scale-90 ${FOCUS_RING}`}
+                        style={{ "--row-hover": colors.hoverBg } as CSSProperties}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="relative shrink-0" ref={stickerTrayRef}>
+              <button
+                type="button"
+                onClick={() => setStickerTrayOpen((v) => !v)}
+                disabled={inputDisabled}
+                title={windowOpen ? "Stickers guardados" : "Ventana vencida: no puedes escribir"}
+                aria-label="Stickers guardados"
+                aria-haspopup="true"
+                aria-expanded={stickerTrayOpen}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
+                style={{ color: stickerTrayOpen ? "#00a884" : colors.textSecondary }}
+              >
+                <StickerIcon />
+              </button>
+
+              {stickerTrayOpen && (
+                <div
+                  role="menu"
+                  className="absolute bottom-12 left-0 z-30 w-72 overflow-hidden rounded-lg shadow-lg"
+                  style={{ background: colors.bgPrimary, border: `1px solid ${colors.border}` }}
+                >
+                  {savedStickers.length === 0 ? (
+                    <p className="p-4 text-center text-xs" style={{ color: colors.textSecondary }}>
+                      Todavía no guardaste ningún sticker — hacé click derecho
+                      en uno que te manden para guardarlo acá.
+                    </p>
+                  ) : (
+                    <div className="grid max-h-60 grid-cols-4 gap-1 overflow-y-auto p-2">
+                      {savedStickers.map((sticker) => (
+                        <button
+                          key={sticker.id}
+                          type="button"
+                          onClick={() => handleSendSticker(sticker.id)}
+                          disabled={sendingStickerId !== null}
+                          title="Enviar sticker"
+                          className={`flex h-16 w-16 items-center justify-center rounded-md transition hover:bg-[var(--row-hover)] active:scale-90 disabled:opacity-40 ${FOCUS_RING}`}
+                          style={{ "--row-hover": colors.hoverBg } as CSSProperties}
+                        >
+                          {sendingStickerId === sticker.id ? (
+                            <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: colors.textSecondary }}>
+                              <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
+                              <path d="M12 2a10 10 0 0 1 10 10" />
+                            </svg>
+                          ) : sticker.animated ? (
+                            <LoopingSticker
+                              src={`/api/stickers/${sticker.id}/image`}
+                              alt="Sticker guardado"
+                              className="h-14 w-14 object-contain"
+                            />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={`/api/stickers/${sticker.id}/image`}
+                              alt="Sticker guardado"
+                              className="h-14 w-14 object-contain"
+                              loading="lazy"
+                            />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -807,6 +1092,7 @@ export function ChatWindow({
               </svg>
             </button>
             <input
+              ref={draftInputRef}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder={

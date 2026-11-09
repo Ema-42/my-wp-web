@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatMessage } from "@/lib/types";
 import { formatTime } from "./format";
 import { useTheme } from "./ThemeContext";
+import { LoopingSticker } from "./LoopingSticker";
 
 /** Envuelve las coincidencias de `query` dentro de `text` en `<mark>`. */
 function highlightMatches(text: string, query: string): ReactNode {
@@ -53,24 +54,74 @@ function DownloadIcon() {
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+      <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+    </svg>
+  );
+}
+
 type Props = {
   message: ChatMessage;
   /** Texto buscado en la barra de búsqueda del chat; resalta coincidencias. */
   highlightQuery?: string;
   /** Es el resultado actualmente seleccionado al navegar la búsqueda. */
   isActiveMatch?: boolean;
+  /** Click en un sticker recibido + botón "Guardar" lo suma a la bandeja propia. */
+  onSaveSticker?: (whatsappMediaId: string) => Promise<void>;
 };
 
-export function MessageBubble({ message, highlightQuery, isActiveMatch }: Props) {
+export function MessageBubble({ message, highlightQuery, isActiveMatch, onSaveSticker }: Props) {
   const { colors } = useTheme();
   const isOutgoing = message.role === "bot";
   const attachment = message.attachment;
+  const isSticker = attachment?.mediaType === "sticker" && attachment.whatsappMediaId;
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const saveMenuRef = useRef<HTMLDivElement | null>(null);
+  // Solo los stickers que te manda el contacto se pueden guardar en tu
+  // propia bandeja (los que vos mandás ya están ahí, por definición).
+  const canSaveSticker = isSticker && !isOutgoing && Boolean(onSaveSticker);
+
+  // Click afuera del sticker/botón cierra el menú de "Guardar" sin guardar.
+  useEffect(() => {
+    if (!saveMenuOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (saveMenuRef.current && !saveMenuRef.current.contains(event.target as Node)) {
+        setSaveMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [saveMenuOpen]);
+
+  function handleStickerClick() {
+    if (!canSaveSticker) return;
+    setSaveMenuOpen((v) => !v);
+  }
+
+  async function confirmSaveSticker() {
+    if (!canSaveSticker || saveState === "saving" || !attachment?.whatsappMediaId) return;
+    setSaveState("saving");
+    try {
+      await onSaveSticker!(attachment.whatsappMediaId);
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    } finally {
+      setSaveMenuOpen(false);
+      setTimeout(() => setSaveState("idle"), 1500);
+    }
+  }
   const autoCaption = attachment
     ? attachment.mediaType === "image"
       ? `🖼️ ${attachment.filename}`
       : attachment.mediaType === "audio"
         ? "🎤 Nota de voz"
-        : `📎 ${attachment.filename}`
+        : attachment.mediaType === "sticker"
+          ? "🎨 Sticker"
+          : `📎 ${attachment.filename}`
     : null;
   const hasOwnCaption = attachment && message.text && message.text !== autoCaption;
   const text = highlightQuery ? highlightMatches(message.text, highlightQuery) : message.text;
@@ -78,17 +129,58 @@ export function MessageBubble({ message, highlightQuery, isActiveMatch }: Props)
   return (
     <div className={`message-enter flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
       <div
-        className={`overflow-hidden rounded-lg shadow-sm transition-shadow ${
-          attachment?.mediaType === "image" && attachment.whatsappMediaId
-            ? "max-w-[75%]"
-            : "max-w-[65%] px-3 py-2"
+        className={`overflow-hidden transition-shadow ${
+          isSticker
+            ? "bg-transparent shadow-none"
+            : `rounded-lg shadow-sm ${
+                attachment?.mediaType === "image" && attachment.whatsappMediaId
+                  ? "max-w-[75%]"
+                  : "max-w-[65%] px-3 py-2"
+              }`
         } ${isActiveMatch ? "ring-2 ring-[#00a884] ring-offset-1" : ""}`}
         style={{
-          background: isOutgoing ? colors.bubbleOut : colors.bubbleIn,
+          background: isSticker ? "transparent" : isOutgoing ? colors.bubbleOut : colors.bubbleIn,
           color: colors.textPrimary,
         }}
       >
-        {attachment?.mediaType === "audio" && attachment.whatsappMediaId ? (
+        {isSticker ? (
+          <div className={`flex flex-col gap-0.5 ${isOutgoing ? "items-end" : "items-start"}`}>
+            <div className="relative" ref={saveMenuRef}>
+              <LoopingSticker
+                src={`/api/media/${attachment.whatsappMediaId}`}
+                alt="Sticker"
+                title={canSaveSticker ? "Click para guardar" : undefined}
+                className={`h-32 w-32 object-contain ${canSaveSticker ? "cursor-pointer" : ""}`}
+                onClick={handleStickerClick}
+              />
+
+              {saveMenuOpen && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/45">
+                  <button
+                    type="button"
+                    onClick={confirmSaveSticker}
+                    disabled={saveState === "saving"}
+                    className="rounded-full bg-[#00a884] px-3 py-1.5 text-xs font-semibold text-white shadow transition hover:brightness-95 active:scale-95 disabled:opacity-60"
+                  >
+                    {saveState === "saving" ? "Guardando…" : "Guardar"}
+                  </button>
+                </div>
+              )}
+
+              {!saveMenuOpen && saveState !== "idle" && (
+                <span
+                  className="absolute right-0 top-0 flex h-6 w-6 items-center justify-center rounded-full text-white shadow"
+                  style={{ background: saveState === "error" ? "#c0392b" : "#00a884" }}
+                >
+                  {saveState === "saved" ? <CheckIcon /> : "!"}
+                </span>
+              )}
+            </div>
+            <span className="text-[11px]" style={{ color: colors.textSecondary }}>
+              {formatTime(message.createdAt)}
+            </span>
+          </div>
+        ) : attachment?.mediaType === "audio" && attachment.whatsappMediaId ? (
           <>
             <audio
               controls

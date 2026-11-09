@@ -4,8 +4,30 @@ import { parseChatMessage } from "@/lib/chat-message";
 import { sendWhatsAppText } from "@/lib/whatsapp";
 import { getSessionServiceWindow } from "@/lib/service-window";
 
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 100;
+// Tope para "after" (polling): no debería acumularse tanto entre dos polls
+// de 3s, pero evita una respuesta gigante si el chat estuvo mucho sin abrir.
+const MAX_NEWER_MESSAGES = 200;
+
+/**
+ * Paginado por `id` (SERIAL, monótono con el orden de inserción) en vez de
+ * `created_at`: evita ambigüedad cuando dos filas comparten timestamp y es
+ * más barato de indexar/comparar.
+ *
+ * - Sin `before`/`after`: trae los últimos `limit` mensajes (carga inicial).
+ * - Con `before=<id>`: trae hasta `limit` mensajes más viejos que ese id
+ *   ("cargar mensajes anteriores").
+ * - Con `after=<id>`: trae los mensajes nuevos desde ese id (polling).
+ */
 export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get("sessionId");
+  const beforeParam = request.nextUrl.searchParams.get("before");
+  const afterParam = request.nextUrl.searchParams.get("after");
+  const limitParam = Number(request.nextUrl.searchParams.get("limit"));
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(Math.max(Math.trunc(limitParam), 1), MAX_PAGE_SIZE)
+    : DEFAULT_PAGE_SIZE;
 
   if (!sessionId) {
     return NextResponse.json(
@@ -14,13 +36,40 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { rows } = await pool.query(
-    `SELECT id, message, created_at
-     FROM ${CHAT_HISTORY_TABLE}
-     WHERE session_id = $1
-     ORDER BY created_at ASC`,
-    [sessionId]
-  );
+  let rows: Array<{ id: number; message: unknown; created_at: Date }>;
+  let hasMore = false;
+
+  if (afterParam) {
+    const after = Number(afterParam);
+    ({ rows } = await pool.query(
+      `SELECT id, message, created_at
+       FROM ${CHAT_HISTORY_TABLE}
+       WHERE session_id = $1 AND id > $2
+       ORDER BY id ASC
+       LIMIT $3`,
+      [sessionId, after, MAX_NEWER_MESSAGES]
+    ));
+  } else {
+    // Pedimos uno de más para saber si queda historial más viejo, sin una
+    // segunda consulta — se descarta antes de devolver la respuesta.
+    const before = beforeParam ? Number(beforeParam) : null;
+    const { rows: desc } = await pool.query(
+      before
+        ? `SELECT id, message, created_at
+           FROM ${CHAT_HISTORY_TABLE}
+           WHERE session_id = $1 AND id < $2
+           ORDER BY id DESC
+           LIMIT $3`
+        : `SELECT id, message, created_at
+           FROM ${CHAT_HISTORY_TABLE}
+           WHERE session_id = $1
+           ORDER BY id DESC
+           LIMIT $2`,
+      before ? [sessionId, before, limit + 1] : [sessionId, limit + 1]
+    );
+    hasMore = desc.length > limit;
+    rows = desc.slice(0, limit).reverse();
+  }
 
   const messages = rows.map((row) => {
     const parsed = parseChatMessage(row.message);
@@ -33,7 +82,7 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  return NextResponse.json({ messages });
+  return NextResponse.json({ messages, hasMore });
 }
 
 export async function POST(request: NextRequest) {
